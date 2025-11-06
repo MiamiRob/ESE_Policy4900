@@ -6,7 +6,8 @@
         "reports_dir": "C:\\BCPS\\ESE\\Reports",
         "backup_dir": "C:\\BCPS\\ESE\\Backups\\Policy4900_Reports_Master",
         "void_overrides_file": "C:\\BCPS\\ESE\\Void_Schools\\void_overrides.csv",
-        "retention_file": "C:\\BCPS\\ESE\\Policy4900_Reports_Master\\Policy4900_Retained.csv"
+        "retention_file": "C:\\BCPS\\ESE\\Policy4900_Reports_Master\\Policy4900_Retained.csv",
+        "log_dir": "C:\\BCPS\\ESE\\Logs"
     },
     "processing": {
         "grey_shades": [
@@ -65,6 +66,10 @@
             "Camera Type",
             "Notes"
         ]
+    },
+    "timeline": {
+        "auto_generate": true,
+        "output_file": "Policy4900_Approval_Timeline.xlsx"
     },
     "logging": {
         "level": "INFO",

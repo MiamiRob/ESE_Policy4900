@@ -21,40 +21,28 @@ from datetime import datetime
 import pandas as pd
 
 
-def setup_logging(script_name: str):
-    """
-    Set up logging to both console and timestamped file.
-
-    Log file format: {script_name}_YYYYMMDD_HHMM.log
-    Log directory: ./Logs/ (created if doesn't exist)
-    """
+def setup_logging(script_name: str, config: dict | None = None):
     from datetime import datetime
     from pathlib import Path
+    log_dir_str = (config or {}).get("paths", {}).get("log_dir", "Logs")
+    log_dir = Path(log_dir_str).expanduser().resolve()
+    log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Create Logs directory if it doesn't exist
-    log_dir = Path("Logs")
-    log_dir.mkdir(exist_ok=True)
-
-    # Create timestamped log filename (military time)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     log_file = log_dir / f"{script_name}_{timestamp}.log"
 
-    # Configure logging to both file and console
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s - %(levelname)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.FileHandler(log_file, encoding='utf-8'),
-            logging.StreamHandler()
-        ],
-        force=True  # Override any existing configuration
+        handlers=[logging.FileHandler(log_file, encoding="utf-8"), logging.StreamHandler()],
+        force=True,
     )
-
     logging.info("=" * 70)
     logging.info(f"Log file: {log_file}")
     logging.info("=" * 70)
     return log_file
+
 
 
 class ReportProcessor:
@@ -368,15 +356,14 @@ class ReportProcessor:
 
 
 def main():
-    # Set up logging to both console and timestamped file
-    log_file = setup_logging("task1_process_reports")
+    processor = ReportProcessor()  # builds self.config
+    log_file = setup_logging("task1_process_reports", processor.config)
 
     logging.info("=" * 70)
     logging.info("   TASK 1: Process New Policy 4900 Reports")
     logging.info("=" * 70)
     logging.info("")
 
-    processor = ReportProcessor()
     logging.info(f"Reports directory: {processor.new_reports_dir}")
     logging.info("")
 
