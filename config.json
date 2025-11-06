@@ -1,0 +1,80 @@
+{
+    "paths": {
+        "new_reports_dir": "C:\\BCPS\\ESE\\Policy4900_Reports_New",
+        "master_dir": "C:\\BCPS\\ESE\\Policy4900_Reports_Master",
+        "master_file": "Policy4900_Tracking_Master.xlsx",
+        "reports_dir": "C:\\BCPS\\ESE\\Reports",
+        "backup_dir": "C:\\BCPS\\ESE\\Backups\\Policy4900_Reports_Master",
+        "void_overrides_file": "C:\\BCPS\\ESE\\Void_Schools\\void_overrides.csv",
+        "retention_file": "C:\\BCPS\\ESE\\Policy4900_Reports_Master\\Policy4900_Retained.csv"
+    },
+    "processing": {
+        "grey_shades": [
+            "D9D9D9",
+            "BFBFBF",
+            "A6A6A6",
+            "808080"
+        ],
+        "preserve_manual_columns": true,
+        "generate_alerts": true
+    },
+    "columns": {
+        "report_columns": [
+            "School of Instruction",
+            "FISH Number",
+            "Room",
+            "FISH List",
+            "Total Student Count",
+            "# of Students Opt In",
+            "# of Students Opt Out",
+            "# of Students No Response",
+            "% Opt In",
+            "% Opt Out",
+            "% No Response",
+            "# of ESE Students",
+            "Mark if Void"
+        ],
+        "master_columns": [
+            "School of Instruction",
+            "FISH Number",
+            "Room",
+            "FISH List",
+            "Total Student Count",
+            "# of Students Opt In",
+            "# of Students Opt Out",
+            "# of Students No Response",
+            "% Opt In",
+            "% Opt Out",
+            "% No Response",
+            "# of ESE Students",
+            "Mark if Void",
+            "Date First Seen",
+            "Change Control",
+            "Change Ack",
+            "Change First Seen",
+            "Change Last Seen",
+            "Previous Approval Status",
+            "Approval Status",
+            "Date Added to Installation List",
+            "Installation Status",
+            "Installation Date",
+            "Activation Status",
+            "Activation Date",
+            "Camera Source School",
+            "Camera Source Classroom",
+            "Camera Type",
+            "Notes"
+        ]
+    },
+    "logging": {
+        "level": "INFO",
+        "file": "camera_tracking.log"
+    },
+    "output": {
+        "date_format": "%m-%d-%Y",
+        "filename_date_format": "%m%d%Y",
+        "master_sheet_name": "Policy 4900 - Classroom Percent",
+        "show_statistics": true,
+        "use_colors": true
+    }
+}
