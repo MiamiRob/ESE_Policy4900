@@ -39,6 +39,31 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.formatting.rule import CellIsRule, FormulaRule
 
 
+def setup_logging(script_name: str, config: dict | None = None):
+    """
+    Setup logging to write to both file and console.
+    Logs are written to the directory specified in config.json paths.log_dir
+    """
+    from datetime import datetime
+    from pathlib import Path
+    log_dir_str = (config or {}).get("paths", {}).get("log_dir", "Logs")
+    log_dir = Path(log_dir_str).expanduser().resolve()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M")
+    log_file = log_dir / f"{script_name}_{ts}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[logging.FileHandler(log_file, encoding="utf-8"), logging.StreamHandler()],
+        force=True,
+    )
+    logging.info("=" * 70)
+    logging.info(f"Log file: {log_file}")
+    logging.info("=" * 70)
+    return log_file
+
+
 class MasterMerger:
     """Merge processed reports into master tracking file with Excel formatting and retention system."""
 
@@ -565,25 +590,25 @@ class MasterMerger:
                             df_master.at[i, "Change Control"] = "No Change"
                             stats["no_change"] += 1
 
-        else:
-            # New classroom
-            new_row = {c: row.get(c, "") for c in self.master_columns}
-            new_row["key_sf"] = k
-            new_row["Change Control"] = "Added"
-            new_row["Previous Approval Status"] = ""
-            new_row["Date First Seen"] = report_date
+            else:
+                # New classroom - use loc to append directly (avoids concat FutureWarning)
+                new_row = {c: row.get(c, "") for c in self.master_columns}
+                new_row["key_sf"] = k
+                new_row["Change Control"] = "Added"
+                new_row["Previous Approval Status"] = ""
+                new_row["Date First Seen"] = report_date
 
-            # Calculate Approval Status for new classroom
-            new_row["Approval Status"] = self.calculate_approval_status(row)
+                # Calculate Approval Status for new classroom
+                new_row["Approval Status"] = self.calculate_approval_status(row)
 
-            if new_row.get("Approval Status") == "Approved - Camera Authorized":
-                new_row["Date Added to Installation List"] = report_date
+                if new_row.get("Approval Status") == "Approved - Camera Authorized":
+                    new_row["Date Added to Installation List"] = report_date
 
-            # Append using loc instead of concat (more efficient, avoids FutureWarning)
-            next_idx = len(df_master)
-            df_master.loc[next_idx] = new_row
-            master_idx_by_key[k] = next_idx
-            stats["added"] += 1
+                # Append using loc instead of concat (more efficient, avoids FutureWarning)
+                next_idx = len(df_master)
+                df_master.loc[next_idx] = new_row
+                master_idx_by_key[k] = next_idx
+                stats["added"] += 1
 
         # Step 2: apply manual Void overrides to master
         if self.void_keys:
@@ -835,8 +860,6 @@ class MasterMerger:
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-
     print("=" * 70)
     print("TASK 2: Merge Processed Reports into Master Tracking")
     print("(Enhanced with Retention System for Installed/Active Cameras)")
@@ -844,6 +867,8 @@ def main():
     print()
 
     merger = MasterMerger()
+    setup_logging("task2_merge_to_master", merger.config)
+
     print(f"[SEARCH] Master file: {merger.master_file.name}")
     print(f"[SEARCH] Retention file: {merger.retention_file.name}")
     print(f"[DIR] Reports directory: {merger.new_reports_dir}")
