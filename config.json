@@ -53,7 +53,9 @@
             "Change Control",
             "Change Ack",
             "Change First Seen",
-            "Change Last Seen",
+            "Last Status Change",
+            "Last Seen In Reports",
+            "Authorized Date",
             "Previous Approval Status",
             "Approval Status",
             "Date Added to Installation List",
@@ -64,10 +66,7 @@
             "Camera Source School",
             "Camera Source Classroom",
             "Camera Type",
-            "Notes",
-            "Report Date",
-            "Mail Code",
-            "School Code"
+            "Notes"
         ],
         "required_fields": [
             "School of Instruction",

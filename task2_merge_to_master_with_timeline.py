@@ -18,6 +18,11 @@ Key Features:
 - Applies conditional formatting
 - Honors manual Void overrides from paths.void_overrides_file
 
+- New tracking fields:
+  - Authorized Date → first report date when the classroom became Approved - Camera Authorized
+  - Last Seen In Reports → most recent daily CSV in which the classroom appeared
+  - Last Status Change → renamed from Change Last Seen; marks the last approval-state or missing-status change
+
 Manual Void rules:
 - Overrides file headers: School of Instruction, Room, Mark if Void, Approval Status
 - If a (School, Room) appears with either "Mark if Void" == "Void" OR "Approval Status" == "Void",
@@ -97,7 +102,8 @@ class MasterMerger:
             "Total Student Count", "# of Students Opt In", "# of Students Opt Out",
             "# of Students No Response", "% Opt In", "% Opt Out", "% No Response",
             "# of ESE Students", "Mark if Void", "Date First Seen", "Change Control",
-            "Change Ack", "Change First Seen", "Change Last Seen",
+            "Change Ack", "Change First Seen", "Last Status Change",
+            "Last Seen In Reports", "Authorized Date",
             "Previous Approval Status", "Approval Status", "Date Added to Installation List",
             "Installation Status", "Installation Date", "Activation Status", "Activation Date",
             "Camera Source School", "Camera Source Classroom", "Camera Type", "Notes"
@@ -112,6 +118,7 @@ class MasterMerger:
             "Camera Type", "Notes",
             "Change Ack",  # Manual acknowledgment - never overwrite
             "Change Control",  # Preserve Change Control during copy-in
+            "Authorized Date"  # Protect first-approval date
         ]
 
         self.date_format = self.config.get("output", {}).get("date_format", "%m-%d-%Y")
@@ -255,6 +262,11 @@ class MasterMerger:
         else:
             df = pd.read_excel(self.master_file, sheet_name=self.sheet_name, engine="openpyxl")
 
+        # Backward compatibility: migrate old column name
+        if "Change Last Seen" in df.columns and "Last Status Change" not in df.columns:
+            df["Last Status Change"] = df["Change Last Seen"]
+            df.drop(columns=["Change Last Seen"], inplace=True)
+
         # Ensure all columns present
         for col in self.master_columns:
             if col not in df.columns:
@@ -270,7 +282,7 @@ class MasterMerger:
         df["key_sf"] = self._mk_key_frame(df)
 
         for col in ["Previous Approval Status", "Date First Seen", "Change Control",
-                    "Change Ack", "Change First Seen", "Change Last Seen"]:
+                    "Change Ack", "Change First Seen", "Last Status Change"]:
             if col not in df.columns:
                 df[col] = ""
 
@@ -522,6 +534,8 @@ class MasterMerger:
 
                 # CRITICAL: Calculate CURRENT Approval Status from existing master data BEFORE updating
                 old_approval = self.calculate_approval_status(df_master.iloc[i])
+                # Update "Last Seen In Reports" for any classroom appearing in this report
+                df_master.at[i, "Last Seen In Reports"] = report_date
                 df_master.at[i, "Previous Approval Status"] = old_approval
 
                 # Update non-protected columns from report
@@ -535,11 +549,16 @@ class MasterMerger:
                 new_approval = self.calculate_approval_status(df_master.iloc[i])
                 df_master.at[i, "Approval Status"] = new_approval
 
-                # If approved and first time, set Date Added to Installation List
+                # If approved and first time, set dates
                 if new_approval == "Approved - Camera Authorized":
                     existing = df_master.at[i, "Date Added to Installation List"]
                     if pd.isna(existing) or str(existing).strip() == "":
                         df_master.at[i, "Date Added to Installation List"] = report_date
+
+                    # First-time Authorized Date
+                    existing_auth = str(df_master.at[i, "Authorized Date"] or "").strip()
+                    if not existing_auth:
+                        df_master.at[i, "Authorized Date"] = report_date
 
                 # Change Control with one-time ACK behavior
                 ack = str(df_master.at[i, "Change Ack"] or "").strip()
@@ -555,7 +574,7 @@ class MasterMerger:
                     df_master.at[i, "Change Control"] = label
                     if not str(df_master.at[i, "Change First Seen"] or "").strip():
                         df_master.at[i, "Change First Seen"] = report_date
-                    df_master.at[i, "Change Last Seen"] = report_date
+                    df_master.at[i, "Last Status Change"] = report_date
                     # Clear any old ACK; it was for a prior change
                     if ack:
                         df_master.at[i, "Change Ack"] = ""
@@ -582,7 +601,7 @@ class MasterMerger:
                         cur = str(df_master.at[i, "Change Control"] or "").strip()
                         if cur in {"Approval Gained", "Approval Lost"}:
                             # Keep sticky alert visible until acknowledged
-                            df_master.at[i, "Change Last Seen"] = report_date
+                            df_master.at[i, "Last Status Change"] = report_date
                         elif old_approval != new_approval:
                             df_master.at[i, "Change Control"] = "Status Changed"
                             stats["status_changed"] += 1
@@ -597,12 +616,17 @@ class MasterMerger:
                 new_row["Change Control"] = "Added"
                 new_row["Previous Approval Status"] = ""
                 new_row["Date First Seen"] = report_date
+                new_row["Last Seen In Reports"] = report_date
 
-                # Calculate Approval Status for new classroom
+                # Calculate Approval Status for new classroom (do this BEFORE date logic)
                 new_row["Approval Status"] = self.calculate_approval_status(row)
 
-                if new_row.get("Approval Status") == "Approved - Camera Authorized":
+                # Date fields that depend on being approved
+                if new_row["Approval Status"] == "Approved - Camera Authorized":
                     new_row["Date Added to Installation List"] = report_date
+                    new_row["Authorized Date"] = report_date
+                else:
+                    new_row["Authorized Date"] = ""
 
                 # Append using loc instead of concat (more efficient, avoids FutureWarning)
                 next_idx = len(df_master)
@@ -662,7 +686,7 @@ class MasterMerger:
             # Track when this missing state was first seen
             if not str(df_master.at[i, "Change First Seen"] or "").strip():
                 df_master.at[i, "Change First Seen"] = report_date
-            df_master.at[i, "Change Last Seen"] = report_date
+            df_master.at[i, "Last Status Change"] = report_date
 
             # ACK not used for missing status (it's persistent, not a change event)
             if str(df_master.at[i, "Change Ack"] or "").strip():
@@ -699,6 +723,8 @@ class MasterMerger:
         """
         Generate approval timeline grid for classrooms that have reached 100% approval.
         Shows Opt-In % over time with dates across the top.
+        ENHANCED: Distinguishes "No Data" (pre-approval) vs "Missing" (post-approval),
+        adds Current Status column, and generates alert report for cameras requiring action.
         """
         logging.info("Starting timeline generation...")
 
@@ -715,7 +741,7 @@ class MasterMerger:
             logging.warning("No processed reports found for timeline generation")
             return
 
-        # Dictionary to store data: key = (school, room), value = {date: opt_in_pct}
+        # Dictionary to store data: key = (school, mail, fish, room), value = {date: opt_in_pct}
         timeline_data = {}
         all_dates = set()
 
@@ -759,7 +785,6 @@ class MasterMerger:
                     # Store percentage
                     timeline_data[key][date_str] = opt_in_pct
 
-
             except Exception as e:
                 logging.warning(f"Error processing {csv_path.name} for timeline: {e}")
                 continue
@@ -782,80 +807,186 @@ class MasterMerger:
         # Sort dates chronologically
         sorted_dates = sorted(all_dates, key=lambda d: datetime.strptime(d, self.date_format))
 
-        # Initialize list to collect rows
+        # Build each classroom's timeline row with No Data vs Missing
         rows = []
-
-        # Build each classroom's timeline row
         for (school, mail, fish, room), dates in sorted(filtered_data.items()):
             row_data = {
                 "School of Instruction": school,
-                                "FISH Number": fish,
-                "Room": room
+                "FISH Number": fish,
+                "Room": room,
             }
-            # Add percentage for each date
-            for date_str in sorted_dates:
+
+            # First date index where the room hit 100%
+            first_100_idx = None
+            for idx, date_str in enumerate(sorted_dates):
+                if date_str in dates:
+                    pct = dates[date_str]
+                    if pct <= 1.0:
+                        pct = pct * 100
+                    if pct >= 100:
+                        first_100_idx = idx
+                        break
+
+            # Fill per date
+            for idx, date_str in enumerate(sorted_dates):
                 if date_str in dates:
                     pct = dates[date_str]
                     if pct <= 1.0:
                         pct = pct * 100
                     row_data[date_str] = pct
                 else:
-                    row_data[date_str] = "Missing"  # explicit gap marker
+                    if first_100_idx is None or idx < first_100_idx:
+                        row_data[date_str] = "No Data"
+                    else:
+                        row_data[date_str] = "Missing"
 
             rows.append(row_data)
 
         # Convert rows to DataFrame
         df_timeline = pd.DataFrame(rows)
 
-        # Optional: add a Missing Count column
-        date_cols = [d for d in df_timeline.columns if d not in
-                     {"School of Instruction", "Mail Code", "FISH Number", "Room"}]
+        # Identify date columns (exclude School, FISH, Room)
+        date_cols = [d for d in df_timeline.columns if d not in {"School of Instruction", "FISH Number", "Room"}]
+
+        # Helper: get last known percentage (ignoring "No Data" and "Missing")
+        def _last_known_pct(row):
+            val = None
+            for d in date_cols:
+                x = row.get(d)
+                if isinstance(x, (int, float)):
+                    val = float(x)
+                elif isinstance(x, str) and x.endswith("%"):
+                    try:
+                        val = float(x.rstrip("%"))
+                    except:
+                        pass
+            return val
+
+        # Helper: find first date where room reached 100%
+        def _first_reached_100(row):
+            for d in date_cols:
+                x = row.get(d)
+                if isinstance(x, (int, float)) and float(x) >= 100:
+                    return d
+                if isinstance(x, str) and x.endswith("%"):
+                    try:
+                        if float(x.rstrip("%")) >= 100:
+                            return d
+                    except:
+                        pass
+            return ""
+
+        # Add "First Reached 100%" column
+        df_timeline["First Reached 100%"] = df_timeline.apply(_first_reached_100, axis=1)
+
+        # Add "Current Status" column with Logan's "Missing after 100%" rule
+        def _current_status(row):
+            """
+            Determine current approval status.
+            CRITICAL: Any "Missing" data after first 100% = Not Approved
+            (Cannot confirm current consent without current data)
+            """
+            # Find first 100% index
+            first_100_idx = None
+            for i, d in enumerate(date_cols):
+                x = row.get(d)
+                if isinstance(x, (int, float)) and x >= 100:
+                    first_100_idx = i
+                    break
+                if isinstance(x, str) and x.endswith("%"):
+                    try:
+                        if float(x.rstrip("%")) >= 100:
+                            first_100_idx = i
+                            break
+                    except:
+                        pass
+
+            # Safety: timeline is filtered to reached-100 rows, but keep a sane default
+            if first_100_idx is None:
+                last_pct = _last_known_pct(row)
+                return "Approved" if (last_pct is not None and last_pct >= 100) else "Not Approved"
+
+            # CRITICAL: If any "Missing" occurs after first 100%, treat as Not Approved
+            # Rationale: Cannot confirm current consent without current data
+            if any(row.get(d) == "Missing" for d in date_cols[first_100_idx + 1:]):
+                return "Not Approved"
+
+            # Otherwise fall back to last numeric percentage
+            last_pct = _last_known_pct(row)
+            return "Approved" if (last_pct is not None and last_pct >= 100) else "Not Approved"
+
+        df_timeline["Current Status"] = df_timeline.apply(_current_status, axis=1)
+
+        # Add "Missing Count" column
         df_timeline["Missing Count"] = (df_timeline[date_cols] == "Missing").sum(axis=1)
 
-        for col in sorted_dates:
-            df_timeline[col] = df_timeline[col].apply(
-                lambda x: f"{int(x)}%" if isinstance(x, (int, float)) else x
-            )
-
-        # Write to Excel with formatting
+        # Write timeline to Excel with formatting
         with pd.ExcelWriter(timeline_path, engine="openpyxl") as writer:
             df_timeline.to_excel(writer, index=False, sheet_name="Approval Timeline")
             ws = writer.sheets["Approval Timeline"]
 
-            # Apply conditional formatting to percentage columns
-            from openpyxl.styles import PatternFill
-            from openpyxl.formatting.rule import CellIsRule
+            # Apply Rob's enhanced color scheme with regression detection
+            from openpyxl.styles import PatternFill, Font
 
-            # Define colors
-            green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
-            yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-            orange_fill = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+            # Define colors per Rob's specifications
+            gray_fill = PatternFill(start_color="BFBFBF", end_color="BFBFBF", fill_type="solid")  # No Data
+            pink_fill = PatternFill(start_color="FFCCFF", end_color="FFCCFF", fill_type="solid")  # Missing
+            green_fill = PatternFill(start_color="66FF99", end_color="66FF99", fill_type="solid")  # 100%
+            yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")  # Regression
 
-            # Apply to date columns (starting from column C)
-            date_col_start = 3  # Column C (1=A, 2=B, 3=C)
+            # Date columns start at column D (after School, FISH, Room)
+            date_col_start = 4  # Column D (1=A, 2=B, 3=C, 4=D)
             date_col_end = date_col_start + len(sorted_dates) - 1
 
-            for col_idx in range(date_col_start, date_col_end + 1):
-                col_letter = ws.cell(row=1, column=col_idx).column_letter
-                cell_range = f"{col_letter}2:{col_letter}{len(df_timeline) + 1}"
+            # Apply colors row by row with regression detection
+            for row_idx in range(2, len(df_timeline) + 2):  # Start at row 2 (skip header)
+                first_100_col = None
 
-                # Green for 100%
-                rule_green = CellIsRule(operator="equal", formula=["100"], fill=green_fill)
-                ws.conditional_formatting.add(cell_range, rule_green)
-
-                # Yellow for 95-99%
-                rule_yellow = CellIsRule(operator="between", formula=["95", "99.99"], fill=yellow_fill)
-                ws.conditional_formatting.add(cell_range, rule_yellow)
-
-                # Orange for 90-94%
-                rule_orange = CellIsRule(operator="between", formula=["90", "94.99"], fill=orange_fill)
-                ws.conditional_formatting.add(cell_range, rule_orange)
-
-                # Format cells as percentage
-                for row_idx in range(2, len(df_timeline) + 2):
+                # First pass: find the first 100% column in this row
+                for col_idx in range(date_col_start, date_col_end + 1):
                     cell = ws.cell(row=row_idx, column=col_idx)
-                    if cell.value is not None:
-                        cell.number_format = "0\"%\""  # Shows as "100%" not "1.00"
+                    cell_val = cell.value
+                    # Check numeric values >= 100
+                    if isinstance(cell_val, (int, float)) and cell_val >= 100:
+                        first_100_col = col_idx
+                        break
+
+                # Second pass: apply colors and formatting based on position and value
+                for col_idx in range(date_col_start, date_col_end + 1):
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    cell_value = cell.value
+
+                    if cell_value == "No Data":
+                        # Gray for pre-approval period
+                        cell.fill = gray_fill
+                    elif cell_value == "Missing":
+                        # Pink for missing data (any time period)
+                        cell.fill = pink_fill
+                    elif isinstance(cell_value, (int, float)):
+                        # Numeric percentage value
+                        if cell_value >= 100:
+                            # Green for 100%
+                            cell.fill = green_fill
+                        elif first_100_col is not None and col_idx > first_100_col:
+                            # Yellow for regression (< 100% after first approval)
+                            cell.fill = yellow_fill
+
+                        # Format as percentage (e.g., "100%" not "100")
+                        cell.value = cell_value / 100
+                        cell.number_format = "0%"
+
+            # Find "Current Status" column and apply red font to "Not Approved"
+            status_col_idx = None
+            for col_idx, col_cell in enumerate(ws[1], start=1):
+                if col_cell.value == "Current Status":
+                    status_col_idx = col_idx
+                    break
+
+            if status_col_idx:
+                for row_idx in range(2, len(df_timeline) + 2):
+                    cell = ws.cell(row=row_idx, column=status_col_idx)
+                    if str(cell.value).strip().lower() == "not approved":
+                        cell.font = Font(color="FF0000")
 
             # Auto-adjust column widths
             for column in ws.columns:
@@ -873,6 +1004,100 @@ class MasterMerger:
         logging.info(f"Timeline generated: {timeline_path}")
         logging.info(f"Classrooms tracked: {len(filtered_data)}")
         logging.info(f"Date range: {sorted_dates[0]} to {sorted_dates[-1]}")
+
+        # ========== GENERATE ALERT REPORT ==========
+        # Build alert report: had 100% at some point, now Not Approved, and has at least one numeric datapoint
+
+        def _has_any_numeric(row):
+            for d in date_cols:
+                if isinstance(row.get(d), (int, float)):
+                    return True
+                v = row.get(d)
+                if isinstance(v, str) and v.endswith("%"):
+                    try:
+                        float(v.rstrip("%"))
+                        return True
+                    except:
+                        pass
+            return False
+
+        def _last_report_date(row):
+            # last timeline column that is NOT empty string or No Data/Missing
+            for d in reversed(date_cols):
+                val = row.get(d, "")
+                if isinstance(val, (int, float)):
+                    return d
+                if str(val).strip() not in ["", "No Data", "Missing"]:
+                    return d
+            return ""
+
+        def _days_since_last_data(row):
+            last_d = _last_report_date(row)
+            if not last_d:
+                return ""
+            try:
+                last_dt = datetime.strptime(last_d, self.date_format)
+                # latest report date is max of sorted_dates
+                latest_dt = datetime.strptime(sorted_dates[-1], self.date_format)
+                return (latest_dt - last_dt).days
+            except:
+                return ""
+
+        alert_df = df_timeline.loc[
+            (df_timeline["First Reached 100%"].astype(str) != "") &
+            (df_timeline["Current Status"] == "Not Approved") &
+            (df_timeline.apply(_has_any_numeric, axis=1))
+            ].copy()
+
+        if len(alert_df) > 0:
+            # Build last known %
+            alert_df["Last Known %"] = alert_df.apply(_last_known_pct, axis=1)  # float or None
+
+            # Ensure numeric for robust sorting (coerce None to NaN)
+            alert_df["Last Known %"] = pd.to_numeric(alert_df["Last Known %"], errors="coerce")
+
+            alert_df["Last Report Date"] = alert_df.apply(_last_report_date, axis=1)
+            alert_df["Days Since Last Data"] = alert_df.apply(_days_since_last_data, axis=1)
+
+            # Final columns and order
+            alert_cols = [
+                "School of Instruction", "FISH Number", "Room",
+                "First Reached 100%", "Current Status",
+                "Last Known %", "Last Report Date", "Days Since Last Data"
+            ]
+            alert_df = alert_df[alert_cols].copy()
+
+            # Sort most critical first (lowest %), NaN last
+            alert_df = alert_df.sort_values("Last Known %", ascending=True, na_position="last")
+
+            # Write alert workbook
+            alert_name = "Policy4900_Alert_Cameras_Requiring_Action.xlsx"
+            alert_path = self.master_file.parent / alert_name
+            with pd.ExcelWriter(alert_path, engine="openpyxl") as aw:
+                alert_df.to_excel(aw, index=False, sheet_name="Alerts")
+                wsa = aw.sheets["Alerts"]
+
+                # Red font for Not Approved in Current Status column (column 5)
+                for row_idx in range(2, len(alert_df) + 2):
+                    cell = wsa.cell(row=row_idx, column=5)  # "Current Status"
+                    if str(cell.value).strip().lower() == "not approved":
+                        cell.font = Font(color="FF0000")
+
+                # Auto-adjust column widths
+                for column in wsa.columns:
+                    max_len = 0
+                    col_letter = column[0].column_letter
+                    for c in column:
+                        try:
+                            max_len = max(max_len, len(str(c.value)) if c.value is not None else 0)
+                        except:
+                            pass
+                    wsa.column_dimensions[col_letter].width = min(max_len + 2, 50)
+
+            logging.info(f"Alert report generated: {alert_path}")
+            logging.info(f"Classrooms requiring action: {len(alert_df)}")
+        else:
+            logging.info("No classrooms requiring action - all approved classrooms maintaining 100%")
 
 
 def main():
