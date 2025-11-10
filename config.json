@@ -64,7 +64,35 @@
             "Camera Source School",
             "Camera Source Classroom",
             "Camera Type",
-            "Notes"
+            "Notes",
+            "Report Date",
+            "Mail Code",
+            "School Code"
+        ],
+        "required_fields": [
+            "School of Instruction",
+            "FISH Number",
+            "Room",
+            "Approval Status"
+        ],
+        "numeric_fields": [
+            "Total Student Count",
+            "# of Students Opt In",
+            "# of Students Opt Out",
+            "# of Students No Response",
+            "# of ESE Students"
+        ],
+        "percentage_fields": [
+            "% Opt In",
+            "% Opt Out",
+            "% No Response"
+        ],
+        "valid_approval_statuses": [
+            "Approved - Camera Authorized",
+            "Denied - Parent Opt Out",
+            "Awaiting Responses",
+            "Void",
+            "Not Requested"
         ]
     },
     "timeline": {
@@ -81,5 +109,12 @@
         "master_sheet_name": "Policy 4900 - Classroom Percent",
         "show_statistics": true,
         "use_colors": true
+    },
+    "validation": {
+        "strict_schema": true,
+        "require_validation": true,
+        "swing_threshold_pct": 50,
+        "max_students_per_room": 500,
+        "artifacts_dir": "C:\\BCPS\\ESE\\Validation_Artifacts"
     }
 }

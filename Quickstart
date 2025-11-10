@@ -1,0 +1,185 @@
+# QUICK START GUIDE - ESE Policy 4900 Tracking
+
+## 🚀 FIRST TIME SETUP (5 minutes)
+
+### 1. Copy Files to Your Project
+Place these 3 files in: `C:\users\rlzim\PycharmProjects\ESE_Policy4900\`
+- `task1_process_reports.py`
+- `task2_merge_to_master.py`
+- `config.json`
+
+### 2. Verify Directories
+Make sure these exist (create if needed):
+- `C:\BCPS\ESE\Policy4900_Reports_New\`
+- `C:\BCPS\ESE\Policy4900_Reports_Master\`
+
+### 3. Test Run
+```bash
+cd C:\users\rlzim\PycharmProjects\ESE_Policy4900
+python task1_process_reports.py
+```
+Should say "No new reports to process" if no CSV files present.
+
+---
+
+## 📅 DAILY USE (5-10 minutes)
+
+### When Stephanie Sends Daily Report:
+
+**Step 1:** Save the CSV file
+- Name format: `MM-DD-YYYY_Policy4900.csv`
+- Example: `10-30-2025_Policy4900.csv`
+- Save to: `C:\BCPS\ESE\Policy4900_Reports_New\`
+
+**Step 2:** Process the report
+```bash
+cd C:\users\rlzim\PycharmProjects\ESE_Policy4900
+python task1_process_reports.py
+```
+✅ Check output - should show classroom counts and approval statuses
+
+**Step 3:** Merge into master
+```bash
+python task2_merge_to_master.py
+```
+✅ Check output - look for:
+- "Missing - Camera Active" 🚨🚨 (URGENT)
+- "Approval Lost" 🚨
+- "Approval Gained"
+
+**Step 4:** Open master Excel file
+- Path: `C:\BCPS\ESE\Policy4900_Reports_Master\Policy4900_Tracking_Master.xlsx`
+- Filter "Change Control" column for alerts
+- Update manual columns as needed (Installation Status, Notes, etc.)
+
+---
+
+## ⚠️ CRITICAL ACTIONS
+
+### 🚨🚨 If You See "Missing - Camera Active":
+1. Open master Excel file
+2. Filter Change Control = "Missing - Camera Active"
+3. **Deactivate those cameras IMMEDIATELY**
+4. Document in Notes column
+
+### 🚨 If You See "Approval Lost":
+1. Open master Excel file
+2. Filter Change Control = "Approval Lost"
+3. Stop any pending installations
+4. Deactivate if camera already active
+5. Update Installation Status column
+
+### ✅ If You See "Approval Gained":
+1. Open master Excel file
+2. Filter Change Control = "Approval Gained"
+3. Add to installation queue
+4. Note the "Date Added to Installation List" (30-day deadline starts!)
+
+---
+
+## 📊 KEY COLUMNS IN MASTER FILE
+
+| Column | What It Means | Changes? |
+|--------|---------------|----------|
+| Date First Seen | When we first saw this classroom | Never |
+| Change Control | What changed today | Every update |
+| Previous Approval Status | Status before today | Every update |
+| Approval Status | Current approval status | Daily |
+| Date Added to Installation List | When first approved | Never* |
+| Installation Status | Your manual tracking | You control |
+| Notes | Your comments | You control |
+
+*Never changes even if approval lost then regained
+
+---
+
+## 🎯 9 CHANGE CONTROL STATUSES
+
+### For Classrooms IN Today's Report:
+1. **Added** - Brand new classroom
+2. **Approval Gained** - Changed TO approved (100% opt-in)
+3. **Approval Lost** - Changed FROM approved (lost approval)
+4. **Status Changed** - Other approval change
+5. **No Change** - Status stayed same
+
+### For Classrooms NOT IN Today's Report:
+6. **Missing - Camera Active** - 🚨🚨 Camera recording but not in report!
+7. **Missing - Camera Installed** - Camera installed but not in report
+8. **Missing - Was Approved** - Was approved but not in report
+9. **Missing - No Camera** - Just not in today's report
+
+---
+
+## 🔄 WHAT EACH FILE DOES
+
+### Task 1: `task1_process_reports.py`
+- Cleans up raw CSV from Stephanie
+- Calculates approval statuses
+- Handles void classrooms
+- Creates `*_PROCESSED.csv` and `.step1` marker
+- Does NOT touch master file
+
+### Task 2: `task2_merge_to_master.py`
+- Reads all `*_PROCESSED.csv` files (in date order)
+- Merges into master Excel file
+- Tracks all changes
+- Sets Date First Seen
+- Sets Date Added to Installation List
+- Creates `.step2` marker
+- Protects your manual entries
+
+---
+
+## 🛠️ TROUBLESHOOTING
+
+**"No new reports found"**
+→ Check filename: `MM-DD-YYYY_Policy4900.csv` in Reports_New folder
+
+**"No reports ready for merge"**
+→ Run Task 1 first!
+
+**"Master file not found"**
+→ Task 2 creates it automatically on first run
+
+**Need to reprocess a date?**
+→ Delete the `.step2` marker file for that date, run Task 2 again
+
+**Excel file corrupt?**
+→ Use `fix_excel_file.py` from old scripts
+
+**Need to restore backup?**
+→ Use `backup_manager.py` from old scripts
+
+---
+
+## 📞 REMEMBER
+
+- **100% approval required** - Even 1 opt-out = denied
+- **30-day installation deadline** - Starts from "Date Added to Installation List"
+- **Void overrides everything** - If marked void, stays void
+- **Protected columns** - Your manual entries never get overwritten
+- **Date First Seen never changes** - Tracks when we first knew about classroom
+- **Date Added to Installation List never changes** - Even if approval lost then regained
+
+---
+
+## ✅ CHECKLIST FOR EACH DAILY RUN
+
+- [ ] Stephanie's CSV saved with correct name format
+- [ ] Run `task1_process_reports.py`
+- [ ] Check output for any errors
+- [ ] Run `task2_merge_to_master.py`
+- [ ] Check for "Missing - Camera Active" alerts
+- [ ] Check for "Approval Lost" alerts
+- [ ] Open master Excel file
+- [ ] Filter and review changes
+- [ ] Update manual columns (Installation Status, Notes)
+- [ ] Save master Excel file
+
+---
+
+**You're all set!** 🎉
+
+For detailed information, see: `README.md`
+
+**Questions?** Review the console output - it tells you everything that happened!

@@ -1,0 +1,368 @@
+# ESE Policy 4900 Camera Tracking System - NEW 2-PHASE APPROACH
+
+## 📋 WHAT YOU HAVE
+
+You now have **TWO DIFFERENT SYSTEMS** in your project:
+
+### ❌ OLD SYSTEM (Don't Use These):
+- `ese_camera_tracker.py` - Old all-in-one script
+- `main.py` - Old menu interface
+- `backup_manager.py` - Can still use for backups
+- `fix_excel_file.py` - Can still use for Excel repairs
+- Old `config.json` - **Missing required columns!**
+
+### ✅ NEW SYSTEM (Use These):
+1. **`task1_process_reports.py`** - Process raw daily reports
+2. **`task2_merge_to_master.py`** - Merge processed reports into master
+3. **`config.json`** (NEW VERSION) - Updated with all required columns
+
+---
+
+## 🚀 HOW TO USE THE NEW SYSTEM
+
+### **STEP 1: Setup (One Time)**
+
+1. Place these 3 files in your PyCharm project:
+   ```
+   C:\users\rlzim\PycharmProjects\ESE_Policy4900\
+   ├── task1_process_reports.py
+   ├── task2_merge_to_master.py
+   └── config.json
+   ```
+
+2. Make sure your directories exist:
+   ```
+   C:\BCPS\ESE\Policy4900_Reports_New\     (raw daily reports go here)
+   C:\BCPS\ESE\Policy4900_Reports_Master\  (master Excel file here)
+   ```
+
+3. Install required packages (if not already installed):
+   ```bash
+   pip install pandas openpyxl numpy
+   ```
+
+---
+
+### **STEP 2: Daily Workflow**
+
+#### **Phase 1: Process New Reports**
+```bash
+python task1_process_reports.py
+```
+
+**What it does:**
+- Finds: `10-30-2025_Policy4900.csv` (raw from Stephanie)
+- Creates: `10-30-2025_Policy4900_PROCESSED.csv`
+- Creates: `10-30-2025_Policy4900.csv.step1` (marker)
+- Cleans data, calculates approval status
+- Does NOT touch the master file yet
+
+**Output Example:**
+```
+======================================================================
+   TASK 1: Process New Policy 4900 Reports
+======================================================================
+
+Found 1 report(s) to process
+
+Processing: 10-30-2025_Policy4900.csv
+  Successfully read with utf-8 encoding
+  Columns present: 13/13
+  Calculated Approval Status
+  Output columns: 25
+  Total rows: 1,287
+    Approved - Camera Authorized: 7
+    Denied - Parent Opt Out: 245
+    Awaiting Responses: 856
+    Not Requested: 179
+
+  Writing: 10-30-2025_Policy4900_PROCESSED.csv
+  ✓ Created: 10-30-2025_Policy4900_PROCESSED.csv
+  ✓ Created marker: 10-30-2025_Policy4900.csv.step1
+
+======================================================================
+   Task 1 Summary
+======================================================================
+Successfully processed: 1
+Failed: 0
+
+✓ Review the *_PROCESSED.csv files before running Task 2
+======================================================================
+```
+
+---
+
+#### **Phase 2: Merge into Master**
+```bash
+python task2_merge_to_master.py
+```
+
+**What it does:**
+- Finds all `*_PROCESSED.csv` files with `.step1` but no `.step2`
+- Processes them in chronological order
+- Merges into `Policy4900_Tracking_Master.xlsx`
+- Creates `.step2` markers to prevent re-processing
+- Tracks all changes with 9-status Change Control logic
+
+**Output Example:**
+```
+======================================================================
+   TASK 2: Merge Processed Reports into Master Tracking
+======================================================================
+
+Master file: Policy4900_Tracking_Master.xlsx
+Reports directory: C:\BCPS\ESE\Policy4900_Reports_New
+
+Found 1 report(s) ready for merge
+
+INFO:
+Merging: 10-30-2025_Policy4900_PROCESSED.csv
+  Report date: 10-30-2025
+  Rows in report: 1,287
+  Statistics:
+    Added: 5
+    Approval Gained: 2
+    Approval Lost: 1
+    Status Changed: 3
+    No Change: 1,276
+    Missing Total: 8
+      ⚠️  Missing - Camera Active: 2
+      Missing - No Camera: 6
+  ✓ Created marker: 10-30-2025_Policy4900.csv.step2
+
+INFO: Writing updated master file...
+
+======================================================================
+   Task 2 Summary
+======================================================================
+Reports merged: 1
+Failed: 0
+
+Master file rows: 1,285 → 1,290
+
+Cumulative Change Statistics:
+  Added: 5
+  Approval Gained: 2
+  Approval Lost: 1
+  Status Changed: 3
+  No Change: 1,276
+  Missing Total: 8
+    ⚠️  ALERT - Missing Camera Active: 2
+    Missing No Camera: 6
+
+✓ Master file updated successfully
+======================================================================
+```
+
+---
+
+## 📊 MASTER FILE STRUCTURE
+
+The master Excel file (`Policy4900_Tracking_Master.xlsx`) contains these columns:
+
+### **From Daily Reports (Updated Each Day):**
+1. School of Instruction
+2. FISH Number
+3. Room
+4. FISH List
+5. Total Student Count
+6. # of Students Opt In/Out/No Response
+7. % Opt In/Out/No Response (as whole numbers: 100, 75, 0)
+8. # of ESE Students
+9. Mark if Void
+
+### **Automatic Tracking (Set Once, Never Changed):**
+10. **Date First Seen** - When classroom first appeared in ANY report
+11. **Date Added to Installation List** - When FIRST approved
+
+### **Change Detection:**
+12. **Change Control** - 9 possible statuses:
+    - "Added" (new classroom)
+    - "Approval Gained" (changed TO approved)
+    - "Approval Lost" (changed FROM approved) 🚨
+    - "Status Changed" (other approval change)
+    - "No Change" (status stayed same)
+    - "Missing - Camera Active" (not in report but camera recording!) 🚨🚨
+    - "Missing - Camera Installed"
+    - "Missing - Was Approved"
+    - "Missing - No Camera"
+
+13. **Previous Approval Status** - Status before last update
+14. **Approval Status** - Current approval status
+
+### **Manual Entry (Protected - Never Overwritten):**
+15. Installation Status
+16. Installation Date
+17. Activation Status
+18. Activation Date
+19. Camera Source School
+20. Camera Source Classroom
+21. Camera Type
+22. Notes
+
+---
+
+## 🎯 KEY BUSINESS RULES
+
+### **Date First Seen:**
+- Set when classroom first appears in any report
+- **NEVER changes** once set
+- Used to track when we first learned about a classroom
+
+### **Date Added to Installation List:**
+- Set when classroom FIRST reaches "Approved - Camera Authorized"
+- **NEVER changes** even if approval lost then regained later
+- Used for 30-day installation deadline compliance
+
+### **Void Logic:**
+- When "Mark if Void" contains "void" (case-insensitive)
+- Sets Approval Status = "Void"
+- Sets ALL tracking columns = "Void"
+- Overrides everything else
+
+### **100% Approval Requirement:**
+- Even 1 parent opt-out = "Denied - Parent Opt Out"
+- Only when all parents opt in = "Approved - Camera Authorized"
+
+### **Protected Columns:**
+These columns are NEVER overwritten once you manually enter data:
+- Date First Seen
+- Date Added to Installation List
+- Installation Status/Date
+- Activation Status/Date
+- Camera Source School/Classroom
+- Camera Type
+- Notes
+
+---
+
+## 🔄 TYPICAL DAILY WORKFLOW
+
+**8:00 AM - Stephanie sends daily report:**
+1. Save as: `C:\BCPS\ESE\Policy4900_Reports_New\10-30-2025_Policy4900.csv`
+
+**8:05 AM - You process it:**
+```bash
+cd C:\users\rlzim\PycharmProjects\ESE_Policy4900
+python task1_process_reports.py
+```
+- Review output, make sure it looks good
+- Check the `*_PROCESSED.csv` file if needed
+
+**8:10 AM - You merge into master:**
+```bash
+python task2_merge_to_master.py
+```
+- Review statistics
+- Look for "Missing - Camera Active" alerts 🚨
+- Check "Approval Lost" changes 🚨
+
+**8:15 AM - Open master Excel file:**
+- Filter for "Missing - Camera Active" → Deactivate those cameras immediately
+- Filter for "Approval Lost" → Remove from installation list
+- Filter for "Approval Gained" → Add to installation queue
+- Update manual columns (Installation Status, Notes, etc.)
+
+---
+
+## ⚠️ CRITICAL ALERTS TO WATCH FOR
+
+### **🚨🚨 Missing - Camera Active**
+- A camera is recording but the classroom is NOT in today's report
+- **ACTION REQUIRED:** Deactivate camera immediately for Policy 4900 compliance
+
+### **🚨 Approval Lost**
+- Was approved, now lost approval (even 1 opt-out)
+- **ACTION REQUIRED:** Stop installation if not done, deactivate if already active
+
+---
+
+## 🔧 TROUBLESHOOTING
+
+### **"No new reports found"**
+- Check that CSV files are in: `C:\BCPS\ESE\Policy4900_Reports_New\`
+- Make sure filename format: `MM-DD-YYYY_Policy4900.csv`
+- Check that `.step1` marker doesn't already exist
+
+### **"No reports ready for merge"**
+- Run Task 1 first!
+- Check that `.step1` markers exist
+- Make sure `.step2` markers don't exist (or delete them to reprocess)
+
+### **"Could not load master file"**
+- Task 2 will create it automatically on first run
+- Or manually create: `Policy4900_Tracking_Master.xlsx`
+
+### **Excel file corruption**
+- Use the old `fix_excel_file.py` script
+- Or open in Excel and Save As → Excel Workbook
+
+---
+
+## 📁 FILE ORGANIZATION
+
+```
+C:\BCPS\ESE\
+├── Policy4900_Reports_New\          (Raw daily reports)
+│   ├── 10-28-2025_Policy4900.csv
+│   ├── 10-28-2025_Policy4900.csv.step1        ← Marker files
+│   ├── 10-28-2025_Policy4900.csv.step2
+│   ├── 10-28-2025_Policy4900_PROCESSED.csv
+│   ├── 10-29-2025_Policy4900.csv
+│   └── ...
+│
+├── Policy4900_Reports_Master\       (Master tracking file)
+│   └── Policy4900_Tracking_Master.xlsx
+│
+└── Backups\
+    └── Policy4900_Reports_Master\   (Automatic backups)
+        └── Policy4900_Master_Backup_20251030_083045.xlsx
+```
+
+---
+
+## 💡 ADVANTAGES OF NEW SYSTEM
+
+### **vs. Old Single-Script Approach:**
+
+1. **Reliability:** Two-phase approach with checkpoints
+2. **Testability:** Can test Task 1 output before merging
+3. **Recoverability:** Marker files prevent duplicate processing
+4. **Auditability:** Complete change history with Previous Approval Status
+5. **Flexibility:** Can reprocess specific dates if needed
+6. **Safety:** Protected columns never get overwritten
+7. **Tracking:** Date First Seen and Date Added to Installation List
+8. **Alerts:** 9-status Change Control catches compliance issues
+
+---
+
+## 📝 NOTES
+
+- **Old scripts still useful:**
+  - `backup_manager.py` - View/restore/compare backups
+  - `fix_excel_file.py` - Fix corrupted Excel files
+
+- **Don't use:**
+  - `ese_camera_tracker.py` - Old system, missing features
+  - `main.py` - Old menu, doesn't support new approach
+  - Old `config.json` - Missing required columns
+
+- **This new system is production-ready** and has all the features you need for Policy 4900 compliance tracking!
+
+---
+
+## 🆘 SUPPORT
+
+If you encounter issues:
+1. Check this README
+2. Review the console output carefully
+3. Check the `.step1` and `.step2` marker files (they're JSON with metadata)
+4. Look at the `*_PROCESSED.csv` files to verify Task 1 output
+5. Use backup_manager.py to restore if needed
+
+---
+
+**Last Updated:** October 30, 2025
+**Version:** 2.0 (Two-Phase System)
+**Author:** Rob Zimmerman
+**Project:** ESE Classroom Camera Policy 4900 Compliance Tracking

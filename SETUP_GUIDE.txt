@@ -1,0 +1,82 @@
+# SETUP_GUIDE.txt
+================================================================================
+PYCHARM QUICK SETUP FOR ESE POLICY 4900 TRACKING SYSTEM
+================================================================================
+
+PROJECT LOCATION: C:\users\rlzim\PycharmProjects\Automate_ACS_SHR
+
+FILE TYPES EXPLANATION:
+-----------------------
+• .py files  = Python scripts (code files)
+• .json file = JSON data file (configuration, NOT Python)
+• .txt files = Documentation
+• .log files = Generated log files
+
+FILES TO CREATE IN YOUR PYCHARM PROJECT:
+----------------------------------------
+1. ese_camera_tracker.py    (Python script - main processor)
+2. main.py                  (Python script - menu interface)
+3. test_setup.py            (Python script - test configuration)
+4. create_config.py         (Python script - creates config.json)
+5. config.json              (JSON file - NOT Python, stores settings)
+6. requirements.txt         (Text file - lists packages needed)
+
+STEP-BY-STEP SETUP:
+-------------------
+
+STEP 1: Create the Python files (.py)
+  - In PyCharm, right-click project folder
+  - New → Python File
+  - Create each .py file and paste the code
+
+STEP 2: Create requirements.txt
+  - Right-click project folder
+  - New → File
+  - Name it: requirements.txt
+  - Paste the requirements content
+
+STEP 3: Install packages
+  - Open Terminal in PyCharm (bottom of screen)
+  - Run: pip install -r requirements.txt
+
+STEP 4: Create config.json
+  - Method A: Run create_config.py
+    • Right-click create_config.py → Run
+    • This will create config.json automatically
+
+  - Method B: Manual creation
+    • Right-click project folder
+    • New → File (NOT Python File!)
+    • Name it: config.json
+    • Paste the JSON configuration
+
+STEP 5: Test the setup
+  - Run test_setup.py
+  - Should show all green checkmarks
+
+STEP 6: Run the main program
+  - Run main.py
+  - Select option 1 to process reports
+
+DATA DIRECTORIES (will be auto-created):
+----------------------------------------
+C:\BCPS\ESE\Policy4900_Reports_New\      ← Place new reports here
+C:\BCPS\ESE\Policy4900_Reports_Master\   ← Master files stored here
+C:\BCPS\ESE\Reports\                     ← Alert reports go here
+
+IMPORTANT NOTES:
+---------------
+• config.json is NOT a Python file - it's a data file
+• The .json extension is important - don't name it config.py
+• All paths use double backslashes: C:\\BCPS\\ESE\\
+• Files are processed based on date in filename (MM-DD-YYYY)
+
+TO RUN DAILY:
+------------
+1. Place new report in: C:\BCPS\ESE\Policy4900_Reports_New\
+2. In PyCharm, run main.py
+3. Select option 1
+4. Check for any red alerts
+5. Done!
+
+================================================================================

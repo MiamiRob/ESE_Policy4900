@@ -504,12 +504,12 @@ class MasterMerger:
             "added": 0, "approval_gained": 0, "approval_lost": 0,
             "status_changed": 0, "no_change": 0,
             "missing_camera_active": 0, "missing_camera_installed": 0,
-            "missing_was_approved": 0, "missing_no_camera": 0,
+            "missing_camera_pending": 0, "missing_no_camera": 0,
             "manual_void_applied": 0,
             # Lists to track specific classrooms for reporting
             "approval_gained_list": [],
             "approval_lost_list": [],
-            "missing_was_approved_list": [],
+            "missing_camera_pending_list": [],
             "missing_camera_active_list": [],
             "missing_camera_installed_list": []
         }
@@ -649,9 +649,9 @@ class MasterMerger:
                 stats["missing_camera_installed"] += 1
                 stats["missing_camera_installed_list"].append(classroom_info)
             elif ("approved" in approval_status) or ("approved" in prev_approval):
-                label = "Missing - Was Approved"
-                stats["missing_was_approved"] += 1
-                stats["missing_was_approved_list"].append(classroom_info)
+                label = "Missing - Camera Pending"
+                stats["missing_camera_pending"] += 1
+                stats["missing_camera_pending_list"].append(classroom_info)
             else:
                 label = "Missing - No Camera"
                 stats["missing_no_camera"] += 1
@@ -735,7 +735,9 @@ class MasterMerger:
                 # Process each classroom
                 for _, row in df.iterrows():
                     school = str(row.get("School of Instruction", "")).strip()
-                    room = str(row.get("Room", "")).strip()
+                    mail = str(row.get("Mail Code", "")).upper().strip()
+                    fish = str(row.get("FISH Number", "")).strip()
+                    room = str(row.get("Room", "")).upper().replace(" ", "").strip()
 
                     if not school or not room:
                         continue
@@ -747,8 +749,8 @@ class MasterMerger:
                     except (ValueError, TypeError):
                         opt_in_pct = 0.0
 
-                    # Create key
-                    key = (school, room)
+                    # Create normalized key
+                    key = (school, mail, fish, room)
 
                     # Initialize if new
                     if key not in timeline_data:
@@ -756,6 +758,7 @@ class MasterMerger:
 
                     # Store percentage
                     timeline_data[key][date_str] = opt_in_pct
+
 
             except Exception as e:
                 logging.warning(f"Error processing {csv_path.name} for timeline: {e}")
@@ -779,27 +782,40 @@ class MasterMerger:
         # Sort dates chronologically
         sorted_dates = sorted(all_dates, key=lambda d: datetime.strptime(d, self.date_format))
 
-        # Build DataFrame for timeline
+        # Initialize list to collect rows
         rows = []
-        for (school, room), dates in sorted(filtered_data.items()):
+
+        # Build each classroom's timeline row
+        for (school, mail, fish, room), dates in sorted(filtered_data.items()):
             row_data = {
                 "School of Instruction": school,
+                                "FISH Number": fish,
                 "Room": room
             }
             # Add percentage for each date
             for date_str in sorted_dates:
                 if date_str in dates:
                     pct = dates[date_str]
-                    # Convert to percentage if needed (0-100 range)
                     if pct <= 1.0:
                         pct = pct * 100
                     row_data[date_str] = pct
                 else:
-                    row_data[date_str] = None  # Missing data
+                    row_data[date_str] = "Missing"  # explicit gap marker
 
             rows.append(row_data)
 
+        # Convert rows to DataFrame
         df_timeline = pd.DataFrame(rows)
+
+        # Optional: add a Missing Count column
+        date_cols = [d for d in df_timeline.columns if d not in
+                     {"School of Instruction", "Mail Code", "FISH Number", "Room"}]
+        df_timeline["Missing Count"] = (df_timeline[date_cols] == "Missing").sum(axis=1)
+
+        for col in sorted_dates:
+            df_timeline[col] = df_timeline[col].apply(
+                lambda x: f"{int(x)}%" if isinstance(x, (int, float)) else x
+            )
 
         # Write to Excel with formatting
         with pd.ExcelWriter(timeline_path, engine="openpyxl") as writer:
@@ -903,11 +919,11 @@ def main():
 
     totals = {
         "added": 0, "approval_gained": 0, "approval_lost": 0, "status_changed": 0, "no_change": 0,
-        "missing_camera_active": 0, "missing_camera_installed": 0, "missing_was_approved": 0,
+        "missing_camera_active": 0, "missing_camera_installed": 0, "missing_camera_pending": 0,
         "missing_no_camera": 0, "manual_void_applied": 0,
         "approval_gained_list": [],
         "approval_lost_list": [],
-        "missing_was_approved_list": [],
+        "missing_camera_pending_list": [],
         "missing_camera_active_list": [],
         "missing_camera_installed_list": []
     }
@@ -970,7 +986,7 @@ def main():
 
             missing_this_report = (
                     stats['missing_camera_active'] + stats['missing_camera_installed'] +
-                    stats['missing_was_approved'] + stats['missing_no_camera']
+                    stats['missing_camera_pending'] + stats['missing_no_camera']
             )
             if missing_this_report > 0:
                 print(f"\n[WARNING]  Classrooms missing from this report: {missing_this_report}")
@@ -982,9 +998,9 @@ def main():
                     print(f"    * Camera Installed but missing: {stats['missing_camera_installed']}")
                     for classroom in stats['missing_camera_installed_list']:
                         print(f"      - {classroom}")
-                if stats['missing_was_approved'] > 0:
-                    print(f"    * Was Approved but missing: {stats['missing_was_approved']}")
-                    for classroom in stats['missing_was_approved_list']:
+                if stats['missing_camera_pending'] > 0:
+                    print(f"    * Camera Pending but missing: {stats['missing_camera_pending']}")
+                    for classroom in stats['missing_camera_pending_list']:
                         print(f"      - {classroom}")
                 if stats['missing_no_camera'] > 0:
                     print(f"    * No Camera, just missing: {stats['missing_no_camera']}")
@@ -1059,7 +1075,7 @@ def main():
 
             missing_total = (
                     totals['missing_camera_active'] + totals['missing_camera_installed'] +
-                    totals['missing_was_approved'] + totals['missing_no_camera']
+                    totals['missing_camera_pending'] + totals['missing_no_camera']
             )
             if missing_total > 0:
                 print(f"\n[WARNING]  Missing Classroom Alerts (cumulative): {missing_total}")
@@ -1071,9 +1087,9 @@ def main():
                     print(f"  * Camera Installed but missing: {totals['missing_camera_installed']}")
                     for classroom in totals['missing_camera_installed_list']:
                         print(f"    - {classroom}")
-                if totals['missing_was_approved'] > 0:
-                    print(f"  * Was Approved but missing: {totals['missing_was_approved']}")
-                    for classroom in totals['missing_was_approved_list']:
+                if totals['missing_camera_pending'] > 0:
+                    print(f"  * Camera Pending but missing: {totals['missing_camera_pending']}")
+                    for classroom in totals['missing_camera_pending_list']:
                         print(f"    - {classroom}")
                 if totals['missing_no_camera'] > 0:
                     print(f"  * No Camera, just missing: {totals['missing_no_camera']}")

@@ -262,6 +262,11 @@ class ReportProcessor:
             if col not in df.columns:
                 df[col] = ""
 
+        # NEW CODE - Populate Report Date from filename
+        report_date = self.extract_date_from_filename(report_path.name)
+        df["Report Date"] = report_date.strftime(self.date_format)
+        logging.info(f"  Set Report Date: {df['Report Date'].iloc[0]}")
+
         # Reorder columns to match master column order
         final_cols = [c for c in self.master_columns if c in df.columns]
         df = df[final_cols].copy()

@@ -1,0 +1,32 @@
+python run_policy4900_pipeline.py
+```
+
+That's it! The orchestrator handles everything.
+
+### What Happens Automatically:
+```
+====================================================================
+Starting Task1 - Process Reports
+====================================================================
+[Processes: 11-08-2025_Policy4900.csv → 11-08-2025_Policy4900_PROCESSED.csv]
+✓ Task1 completed successfully
+
+====================================================================
+Starting Validation - Data Quality Checks  ← AUTOMATIC!
+====================================================================
+[Runs: python validate_processed_data.py]
+[Checks: empty values, duplicates, math, dates, etc.]
+✓ Validation passed - 0 errors, 0 warnings
+
+====================================================================
+Starting Task2 - Merge to Master  ← ONLY RUNS IF VALIDATION PASSED
+====================================================================
+[Merges processed data into Policy4900_Tracking_Master.xlsx]
+✓ Task2 completed successfully
+
+====================================================================
+PIPELINE COMPLETED SUCCESSFULLY
+====================================================================
+✓ Task1: Raw reports processed
+✓ Validation: Data quality checks passed
+✓ Task2: Processed files merged
