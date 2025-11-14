@@ -166,27 +166,26 @@ EXAMPLES:
             print("Check the Task1 log file in your Logs directory for details.")
             sys.exit(exit_code)
 
-    # Execute validation if requested (after Task1 succeeds)
-    if run_validation:
-        exit_code = run_script(validate_script, "Validation - Data Quality Checks")
+        # Execute validation if requested (after Task1 succeeds)
+        if run_validation:
+            exit_code = run_script(validate_script, "Validation - Data Quality Checks")
 
-        if exit_code == 1:
-            # Critical errors - block Task2
-            print_banner("PIPELINE HALTED - Validation Failed")
-            print("Critical data quality errors detected.")
-            print("Fix the issues in the processed CSV files before running Task2.")
-            sys.exit(1)
-        elif exit_code == 2:
-            # Warnings only - inform but don't block
-            print_banner("Validation Warnings Detected")
-            print("Data quality warnings found (see above).")
-            print("Review recommended, but Task2 will proceed.")
-            if run_step2:
-                input("\nPress Enter to continue with Task2, or Ctrl+C to abort...")
+            if exit_code == 1:
+                # Critical errors - block Task2
+                print_banner("PIPELINE HALTED - Validation Failed")
+                print("Critical data quality errors detected.")
+                print("Fix the issues in the processed CSV files before running Task2.")
+                sys.exit(1)
+            elif exit_code == 2:
+                # Warnings only - inform but don't block
+                print_banner("Validation Warnings Detected")
+                print("Data quality warnings found (see above).")
+                print("Review recommended, but Task2 will proceed automatically.\n")
 
-    # Execute Task2 if requested (only after Task1/validation succeed)
-    if run_step2:
-        exit_code = run_script(task2_script, "Task2 - Merge to Master")
+        # Execute Task2 if requested (only after Task1/validation succeed)
+        if run_step2:
+            exit_code = run_script(task2_script, "Task2 - Merge to Master")
+
 
         if exit_code != 0:
             print_banner("PIPELINE HALTED - Task2 Failed")

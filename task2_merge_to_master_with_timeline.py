@@ -576,8 +576,9 @@ class MasterMerger:
                         df_master.at[i, "Date Added to Installation List"] = report_date
 
                     # First-time Authorized Date
-                    existing_auth = str(df_master.at[i, "Authorized Date"] or "").strip()
-                    if not existing_auth:
+                    # Be robust: handle None, NaN, empty string, whitespace
+                    existing_auth = df_master.at[i, "Authorized Date"]
+                    if pd.isna(existing_auth) or str(existing_auth).strip() == "":
                         df_master.at[i, "Authorized Date"] = report_date
 
                 # Change Control with one-time ACK behavior
@@ -672,6 +673,19 @@ class MasterMerger:
         # not a one-time change event. It stays until classroom returns to reports.
         missing_mask = ~df_master["key_sf"].isin(new_keys)
         for i in df_master[missing_mask].index:
+            # CRITICAL: Clear ACK FIRST for ALL missing rooms (including Void)
+            # ACK must be cleared even for Void rooms to prevent sticky acknowledgments
+            if str(df_master.at[i, "Change Ack"] or "").strip():
+                df_master.at[i, "Change Ack"] = ""
+
+            # CRITICAL: Skip Void rows entirely - they are explicitly out of scope
+            # Once voided, we don't care if they disappear from reports
+            mark_void = str(df_master.at[i, "Mark if Void"] or "").strip().lower()
+            if mark_void == "void":
+                # Room is explicitly out of scope. Do not treat disappearance as "missing".
+                # Leave Change Control / dates untouched (but ACK already cleared above).
+                continue
+
             # More robust status checking with null-safety
             activation_status = str(df_master.at[i, "Activation Status"] or "").strip().lower()
             installation_status = str(df_master.at[i, "Installation Status"] or "").strip().lower()
@@ -681,11 +695,6 @@ class MasterMerger:
 
             # NEW: how many students ever opted in?
             opt_in_count = MasterMerger._to_int(df_master.at[i, "# of Students Opt In"])
-
-            # CRITICAL: Clear ACK for ALL missing rooms first (before any continue statements)
-            # ACK is not used for missing status (it's persistent, not a change event)
-            if str(df_master.at[i, "Change Ack"] or "").strip():
-                df_master.at[i, "Change Ack"] = ""
 
             # Enhanced classification with flexible substring matching
             # CRITICAL: Check for both "activat" and "active" to catch both "Activated" and "Active"
@@ -726,6 +735,29 @@ class MasterMerger:
             if not str(df_master.at[i, "Change First Seen"] or "").strip():
                 df_master.at[i, "Change First Seen"] = report_date
             df_master.at[i, "Last Status Change"] = report_date
+
+        # CRITICAL BACKFILL: Set Authorized Date for any approved classroom that's missing it
+        # This handles cases where classrooms existed in master from previous runs without Authorized Date
+        # or were approved in first report but Date wasn't set properly
+        for i, r in df_master.iterrows():
+            approval = r.get("Approval Status", "")
+            auth_date = r.get("Authorized Date")
+
+            if approval == "Approved - Camera Authorized":
+                # Check if Authorized Date is missing
+                if pd.isna(auth_date) or str(auth_date).strip() == "":
+                    # Use Date First Seen as the authorized date
+                    # (when the classroom was first added, it was approved)
+                    first_seen = r.get("Date First Seen", "")
+                    if first_seen and str(first_seen).strip():
+                        df_master.at[i, "Authorized Date"] = first_seen
+                        logging.info(
+                            f"Backfilled Authorized Date for {r.get('School of Instruction')} - {r.get('Room')}: {first_seen}")
+                    else:
+                        # Fallback: use current report date
+                        df_master.at[i, "Authorized Date"] = report_date
+                        logging.info(
+                            f"Backfilled Authorized Date for {r.get('School of Instruction')} - {r.get('Room')}: {report_date} (fallback)")
 
         return df_master, stats
 
@@ -776,7 +808,6 @@ class MasterMerger:
             logging.warning("No processed reports found for timeline generation")
             return
 
-        # Dictionary to store data: key = (school, mail, fish, room), value = {date: opt_in_pct}
         timeline_data = {}
         all_dates = set()
 
@@ -798,6 +829,7 @@ class MasterMerger:
                     school = str(row.get("School of Instruction", "")).strip()
                     mail = str(row.get("Mail Code", "")).upper().strip()
                     fish = str(row.get("FISH Number", "")).strip()
+                    fish_list = str(row.get("FISH List", "")).strip()
                     room = str(row.get("Room", "")).upper().replace(" ", "").strip()
 
                     if not school or not room:
@@ -806,12 +838,15 @@ class MasterMerger:
                     # Get Opt-In percentage
                     opt_in_pct = row.get("% Opt In", 0)
                     try:
+                        # Handle percentage strings like "100.00%"
+                        if isinstance(opt_in_pct, str):
+                            opt_in_pct = opt_in_pct.strip().rstrip('%')
                         opt_in_pct = float(opt_in_pct)
                     except (ValueError, TypeError):
                         opt_in_pct = 0.0
 
-                    # Create normalized key
-                    key = (school, mail, fish, room)
+                    # Create normalized key - include fish_list
+                    key = (school, mail, fish, fish_list, room)
 
                     # Initialize if new
                     if key not in timeline_data:
@@ -844,11 +879,12 @@ class MasterMerger:
 
         # Build each classroom's timeline row with No Data vs Missing
         rows = []
-        for (school, mail, fish, room), dates in sorted(filtered_data.items()):
+        for (school, mail, fish, fish_list, room), dates in sorted(filtered_data.items()):
             row_data = {
                 "School of Instruction": school,
                 "FISH Number": fish,
                 "Room": room,
+                "FISH List": fish_list,
             }
 
             # First date index where the room hit 100%
@@ -881,7 +917,8 @@ class MasterMerger:
         df_timeline = pd.DataFrame(rows)
 
         # Identify date columns (exclude School, FISH, Room)
-        date_cols = [d for d in df_timeline.columns if d not in {"School of Instruction", "FISH Number", "Room"}]
+        date_cols = [d for d in df_timeline.columns if
+                     d not in {"School of Instruction", "FISH Number", "FISH List", "Room"}]
 
         # Helper: get last known percentage (ignoring "No Data" and "Missing")
         def _last_known_pct(row):
@@ -914,41 +951,41 @@ class MasterMerger:
         # Add "First Reached 100%" column
         df_timeline["First Reached 100%"] = df_timeline.apply(_first_reached_100, axis=1)
 
-        # Add "Current Status" column with Logan's "Missing after 100%" rule
+        # Add "Current Status" column - reflects most recent known state
         def _current_status(row):
             """
-            Determine current approval status.
-            CRITICAL: Any "Missing" data after first 100% = Not Approved
-            (Cannot confirm current consent without current data)
+            Determine current status based on MOST RECENT known value.
+            Returns: "Missing", "Approved", or "Not Approved"
+
+            Missing = Classroom disappeared from reports (no current data)
+            Approved = Last known percentage >= 100%
+            Not Approved = Last known percentage < 100%
             """
-            # Find first 100% index
-            first_100_idx = None
-            for i, d in enumerate(date_cols):
-                x = row.get(d)
-                if isinstance(x, (int, float)) and x >= 100:
-                    first_100_idx = i
-                    break
-                if isinstance(x, str) and x.endswith("%"):
+            # Work backwards through date columns to find most recent value
+            for d in reversed(date_cols):
+                val = row.get(d)
+
+                # Check if it's "Missing"
+                if val == "Missing":
+                    return "Missing"
+
+                # Check if it's a numeric percentage
+                if isinstance(val, (int, float)):
+                    return "Approved" if val >= 100 else "Not Approved"
+
+                # Check if it's a percentage string (shouldn't happen but be safe)
+                if isinstance(val, str) and val.endswith("%"):
                     try:
-                        if float(x.rstrip("%")) >= 100:
-                            first_100_idx = i
-                            break
+                        pct = float(val.rstrip("%"))
+                        return "Approved" if pct >= 100 else "Not Approved"
                     except:
                         pass
 
-            # Safety: timeline is filtered to reached-100 rows, but keep a sane default
-            if first_100_idx is None:
-                last_pct = _last_known_pct(row)
-                return "Approved" if (last_pct is not None and last_pct >= 100) else "Not Approved"
+                # "No Data" - keep looking backwards
+                # (empty string or other values - keep looking)
 
-            # CRITICAL: If any "Missing" occurs after first 100%, treat as Not Approved
-            # Rationale: Cannot confirm current consent without current data
-            if any(row.get(d) == "Missing" for d in date_cols[first_100_idx + 1:]):
-                return "Not Approved"
-
-            # Otherwise fall back to last numeric percentage
-            last_pct = _last_known_pct(row)
-            return "Approved" if (last_pct is not None and last_pct >= 100) else "Not Approved"
+            # Fallback if somehow we get through all dates without finding anything
+            return "Not Approved"
 
         df_timeline["Current Status"] = df_timeline.apply(_current_status, axis=1)
 
@@ -968,8 +1005,8 @@ class MasterMerger:
             green_fill = PatternFill(start_color="66FF99", end_color="66FF99", fill_type="solid")  # 100%
             yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")  # Regression
 
-            # Date columns start at column D (after School, FISH, Room)
-            date_col_start = 4  # Column D (1=A, 2=B, 3=C, 4=D)
+            # Date columns start at column E (after School, FISH Number, Room, FISH List)
+            date_col_start = 5  # Column E (1=A, 2=B, 3=C, 4=D, 5=E)
             date_col_end = date_col_start + len(sorted_dates) - 1
 
             # Apply colors row by row with regression detection
@@ -1009,7 +1046,8 @@ class MasterMerger:
                         cell.value = cell_value / 100
                         cell.number_format = "0%"
 
-            # Find "Current Status" column and apply red font to "Not Approved"
+            # Find "Current Status" column and apply colors
+            # Red = Not Approved, Orange = Missing
             status_col_idx = None
             for col_idx, col_cell in enumerate(ws[1], start=1):
                 if col_cell.value == "Current Status":
@@ -1019,8 +1057,11 @@ class MasterMerger:
             if status_col_idx:
                 for row_idx in range(2, len(df_timeline) + 2):
                     cell = ws.cell(row=row_idx, column=status_col_idx)
-                    if str(cell.value).strip().lower() == "not approved":
-                        cell.font = Font(color="FF0000")
+                    status_value = str(cell.value).strip().lower()
+                    if status_value == "not approved":
+                        cell.font = Font(color="FF0000")  # Red
+                    elif status_value == "missing":
+                        cell.font = Font(color="FF8C00")  # Orange (Dark Orange)
 
             # Auto-adjust column widths
             for column in ws.columns:
@@ -1079,7 +1120,7 @@ class MasterMerger:
 
         alert_df = df_timeline.loc[
             (df_timeline["First Reached 100%"].astype(str) != "") &
-            (df_timeline["Current Status"] == "Not Approved") &
+            (df_timeline["Current Status"].isin(["Not Approved", "Missing"])) &
             (df_timeline.apply(_has_any_numeric, axis=1))
             ].copy()
 
@@ -1111,11 +1152,14 @@ class MasterMerger:
                 alert_df.to_excel(aw, index=False, sheet_name="Alerts")
                 wsa = aw.sheets["Alerts"]
 
-                # Red font for Not Approved in Current Status column (column 5)
+                # Color font in Current Status column: Red for Not Approved, Orange for Missing
                 for row_idx in range(2, len(alert_df) + 2):
                     cell = wsa.cell(row=row_idx, column=5)  # "Current Status"
-                    if str(cell.value).strip().lower() == "not approved":
-                        cell.font = Font(color="FF0000")
+                    status_value = str(cell.value).strip().lower()
+                    if status_value == "not approved":
+                        cell.font = Font(color="FF0000")  # Red
+                    elif status_value == "missing":
+                        cell.font = Font(color="FF8C00")  # Orange (Dark Orange)
 
                 # Auto-adjust column widths
                 for column in wsa.columns:
