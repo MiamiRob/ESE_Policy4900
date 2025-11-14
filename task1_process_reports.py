@@ -148,9 +148,9 @@ class ReportProcessor:
         for csv_path in all_csvs:
             step1_marker = csv_path.parent / f"{csv_path.name}.step1"
             if step1_marker.exists():
-                logging.info(f"  âœ“ Already processed (step1): {csv_path.name}")
+                logging.info(f"  Ã¢Å“â€œ Already processed (step1): {csv_path.name}")
             else:
-                logging.info(f"  â†’ Ready for processing: {csv_path.name}")
+                logging.info(f"  Ã¢â€ â€™ Ready for processing: {csv_path.name}")
                 unprocessed.append(csv_path)
 
         logging.info(f"Unprocessed reports: {len(unprocessed)}")
@@ -288,17 +288,23 @@ class ReportProcessor:
 
         Priority:
         1. Check Mark if Void
-        2. Check if any students
-        3. Check for opt-outs
-        4. Check for 100% opt-in
-        5. Check for no responses
+        2. Check FISH List (infrastructure constraint)
+        3. Check if any students
+        4. Check for opt-outs
+        5. Check for 100% opt-in
+        6. Check for no responses
         """
         # FIRST: Check for void flag
         mark_if_void = str(row.get("Mark if Void", "") or "").strip()
         if mark_if_void.lower() in {"y", "yes", "void", "true", "1"} or "void" in mark_if_void.lower():
             return "Void"
 
-        # SECOND: Check student counts
+        # SECOND: Check FISH List (infrastructure constraint)
+        fish_list = str(row.get("FISH List", "") or "").strip().upper()
+        if fish_list == "N":
+            return "Ineligible - FISH List N"
+
+        # THIRD: Check student counts
         try:
             total = int(row.get("Total Student Count", 0) or 0)
             opt_in = int(row.get("# of Students Opt In", 0) or 0)
@@ -330,7 +336,7 @@ class ReportProcessor:
         # Write to CSV (UTF-8 encoding, no index)
         df.to_csv(output_path, index=False, encoding="utf-8")
 
-        logging.info(f"  âœ“ Created: {output_path}")
+        logging.info(f"  Ã¢Å“â€œ Created: {output_path}")
         return output_path
 
     def create_step1_marker(self, original_path: Path, processed_path: Path, df: pd.DataFrame):
@@ -349,7 +355,7 @@ class ReportProcessor:
         with open(marker_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
 
-        logging.info(f"  âœ“ Created marker: {marker_path.name}")
+        logging.info(f"  Ã¢Å“â€œ Created marker: {marker_path.name}")
         return marker_path
 
     @staticmethod
@@ -376,7 +382,7 @@ def main():
     reports = processor.get_unprocessed_reports()
 
     if not reports:
-        logging.info("\nâœ“ No new reports to process")
+        logging.info("\nÃ¢Å“â€œ No new reports to process")
         logging.info("\n" + "=" * 70)
         logging.info("   Task 1 Complete - Nothing to Process")
         logging.info("=" * 70)
@@ -416,7 +422,7 @@ def main():
     logging.info("")
 
     if processed_count > 0:
-        logging.info("âœ“ Review the *_PROCESSED.csv files before running Task 2")
+        logging.info("Ã¢Å“â€œ Review the *_PROCESSED.csv files before running Task 2")
 
     logging.info("=" * 70)
 

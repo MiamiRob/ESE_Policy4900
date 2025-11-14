@@ -91,7 +91,9 @@
             "Denied - Parent Opt Out",
             "Awaiting Responses",
             "Void",
-            "Not Requested"
+            "Not Requested",
+            "Ineligible - FISH List N",
+            "Withdrawn"
         ]
     },
     "timeline": {

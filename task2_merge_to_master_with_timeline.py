@@ -19,9 +19,9 @@ Key Features:
 - Honors manual Void overrides from paths.void_overrides_file
 
 - New tracking fields:
-  - Authorized Date → first report date when the classroom became Approved - Camera Authorized
-  - Last Seen In Reports → most recent daily CSV in which the classroom appeared
-  - Last Status Change → renamed from Change Last Seen; marks the last approval-state or missing-status change
+  - Authorized Date -> first report date when the classroom became Approved - Camera Authorized
+  - Last Seen In Reports -> most recent daily CSV in which the classroom appeared
+  - Last Status Change -> renamed from Change Last Seen; marks the last approval-state or missing-status change
 
 Manual Void rules:
 - Overrides file headers: School of Instruction, Room, Mark if Void, Approval Status
@@ -45,12 +45,7 @@ from openpyxl.formatting.rule import CellIsRule, FormulaRule
 
 
 def setup_logging(script_name: str, config: dict | None = None):
-    """
-    Setup logging to write to both file and console.
-    Logs are written to the directory specified in config.json paths.log_dir
-    """
-    from datetime import datetime
-    from pathlib import Path
+    """Setup logging to file and console. Uses paths.log_dir."""
     log_dir_str = (config or {}).get("paths", {}).get("log_dir", "Logs")
     log_dir = Path(log_dir_str).expanduser().resolve()
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -341,10 +336,25 @@ class MasterMerger:
         """
         Update the retention file with all installed/active cameras.
         This creates a persistent backup that survives master rebuilds.
+
+        IMPORTANT: Excludes change-tracking columns (Change Ack, Change Control, etc.)
+        because these are temporary manual acknowledgments that should start fresh.
         """
         # Filter to only installed/active cameras
         retained_mask = df_master.apply(self._is_installed_or_active, axis=1)
-        df_keep = df_master.loc[retained_mask, self.master_columns + ["key_sf"]].copy()
+
+        # Exclude change-tracking columns from retention
+        # These are manual acknowledgments/alerts that should NOT persist
+        exclude_from_retention = {
+            "Change Ack",  # Manual acknowledgment - should start fresh
+            "Change Control",  # Current change status - should start fresh
+            "Change First Seen",  # Temporary tracking - should start fresh
+            "Last Status Change"  # Temporary tracking - should start fresh
+        }
+
+        # Only retain permanent camera installation data
+        retention_columns = [col for col in self.master_columns if col not in exclude_from_retention]
+        df_keep = df_master.loc[retained_mask, retention_columns + ["key_sf"]].copy()
 
         if len(df_keep) == 0:
             logging.info("No installed/active cameras to retain")
@@ -356,7 +366,7 @@ class MasterMerger:
                 old = pd.read_csv(self.retention_file, dtype=str).fillna("")
 
                 # Ensure all columns present
-                for col in self.master_columns:
+                for col in retention_columns:
                     if col not in old.columns:
                         old[col] = ""
 
@@ -414,6 +424,8 @@ class MasterMerger:
         orange_fill = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
         green_fill = PatternFill(start_color="66FF99", end_color="66FF99", fill_type="solid")
         yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+        gray_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3",
+                                fill_type="solid")  # Light gray for infrastructure constraints
 
         # Define row range for all conditional formatting rules
         start_row = 2
@@ -444,9 +456,12 @@ class MasterMerger:
         rule_q_green = CellIsRule(operator="equal", formula=['"Approved - Camera Authorized"'], fill=green_fill)
         rule_q_denied = CellIsRule(operator="equal", formula=['"Denied - Parent Opt Out"'], font=red_font)
         rule_q_void = CellIsRule(operator="equal", formula=['"Void"'], font=red_font)
+        rule_q_ineligible = CellIsRule(operator="equal", formula=['"Ineligible - FISH List N"'], fill=gray_fill,
+                                       font=red_font)
         ws.conditional_formatting.add(f"{col_Q}{start_row}:{col_Q}{end_row}", rule_q_green)
         ws.conditional_formatting.add(f"{col_Q}{start_row}:{col_Q}{end_row}", rule_q_denied)
         ws.conditional_formatting.add(f"{col_Q}{start_row}:{col_Q}{end_row}", rule_q_void)
+        ws.conditional_formatting.add(f"{col_Q}{start_row}:{col_Q}{end_row}", rule_q_ineligible)
 
         wb.save(self.master_file)
 
@@ -478,6 +493,11 @@ class MasterMerger:
         mark_void = str(row.get("Mark if Void", "")).strip().lower()
         if mark_void == "void":
             return "Void"
+
+        # Check FISH List (infrastructure constraint)
+        fish_list = str(row.get("FISH List", "")).strip().upper()
+        if fish_list == "N":
+            return "Ineligible - FISH List N"
 
         # Safe numeric parsing
         total = MasterMerger._to_int(row.get("Total Student Count", 0))
@@ -586,10 +606,10 @@ class MasterMerger:
 
                     if transition_gained:
                         stats["approval_gained"] += 1
-                        stats["approval_gained_list"].append(classroom_info)
+                        stats["approval_gained_list"].append((k, report_date, classroom_info))
                     else:
                         stats["approval_lost"] += 1
-                        stats["approval_lost_list"].append(classroom_info)
+                        stats["approval_lost_list"].append((k, report_date, classroom_info))
                 else:
                     # No new transition this run
                     if ack:
@@ -657,6 +677,15 @@ class MasterMerger:
             installation_status = str(df_master.at[i, "Installation Status"] or "").strip().lower()
             approval_status = str(df_master.at[i, "Approval Status"] or "").strip().lower()
             prev_approval = str(df_master.at[i, "Previous Approval Status"] or "").strip().lower()
+            fish_list = str(df_master.at[i, "FISH List"] or "").strip().upper()
+
+            # NEW: how many students ever opted in?
+            opt_in_count = MasterMerger._to_int(df_master.at[i, "# of Students Opt In"])
+
+            # CRITICAL: Clear ACK for ALL missing rooms first (before any continue statements)
+            # ACK is not used for missing status (it's persistent, not a change event)
+            if str(df_master.at[i, "Change Ack"] or "").strip():
+                df_master.at[i, "Change Ack"] = ""
 
             # Enhanced classification with flexible substring matching
             # CRITICAL: Check for both "activat" and "active" to catch both "Activated" and "Active"
@@ -676,6 +705,16 @@ class MasterMerger:
                 label = "Missing - Camera Pending"
                 stats["missing_camera_pending"] += 1
                 stats["missing_camera_pending_list"].append(classroom_info)
+            elif fish_list == "N":
+                # Infrastructure constraint: camera cannot be installed
+                # Flag as missing with clear reason why camera isn't the issue
+                label = "Missing - FISH List N"
+                stats["missing_no_camera"] += 1
+            elif opt_in_count == 0:
+                # Never had any Opt In activity: there was never a path to a camera
+                # Flag as missing with clear reason why camera isn't the issue
+                label = "Missing - No Approval"
+                stats["missing_no_camera"] += 1
             else:
                 label = "Missing - No Camera"
                 stats["missing_no_camera"] += 1
@@ -687,10 +726,6 @@ class MasterMerger:
             if not str(df_master.at[i, "Change First Seen"] or "").strip():
                 df_master.at[i, "Change First Seen"] = report_date
             df_master.at[i, "Last Status Change"] = report_date
-
-            # ACK not used for missing status (it's persistent, not a change event)
-            if str(df_master.at[i, "Change Ack"] or "").strip():
-                df_master.at[i, "Change Ack"] = ""
 
         return df_master, stats
 
@@ -926,7 +961,6 @@ class MasterMerger:
             ws = writer.sheets["Approval Timeline"]
 
             # Apply Rob's enhanced color scheme with regression detection
-            from openpyxl.styles import PatternFill, Font
 
             # Define colors per Rob's specifications
             gray_fill = PatternFill(start_color="BFBFBF", end_color="BFBFBF", fill_type="solid")  # No Data
@@ -1099,8 +1133,161 @@ class MasterMerger:
         else:
             logging.info("No classrooms requiring action - all approved classrooms maintaining 100%")
 
+    def generate_action_reports(self, df_master: pd.DataFrame, totals: dict):
+        """
+        Generate Excel reports for Approval Gained and Approval Lost classrooms.
+        These reports are cumulative across all processed reports in this run.
+
+        Reports are saved to configured reports directory with military time timestamps.
+        """
+
+        # Get or create reports directory from config, fallback to master folder
+        cfg_reports = self.config.get("paths", {}).get("reports_dir", "")
+        reports_dir = Path(cfg_reports).expanduser().resolve() if cfg_reports else (
+                self.master_file.parent / "ESE" / "Reports")
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate timestamp for filenames (military time: YYYY-MM-DD-HHMM)
+        timestamp = datetime.now().strftime("%Y-%m-%d-%H%M")
+
+        # Helper to normalize keys from lists that may contain strings or tuples
+        def _normalize_keys(items):
+            """
+            Robust key extraction that handles both formats:
+            - Tuples: (key, date, info) from new code
+            - Strings: classroom_info from old code
+            Also deduplicates while preserving order.
+            """
+            keys = []
+            for it in items:
+                if isinstance(it, tuple) and len(it) >= 1:
+                    keys.append(it[0])  # tuple: (key, date, info)
+                else:
+                    keys.append(str(it))  # string: classroom_info or key
+            # Keep unique while preserving order
+            seen = set()
+            out = []
+            for k in keys:
+                if k not in seen:
+                    seen.add(k)
+                    out.append(k)
+            return out
+
+        # Extract classroom keys from the cumulative lists (handles both old and new formats)
+        gained_keys = _normalize_keys(totals.get('approval_gained_list', []))
+        lost_keys = _normalize_keys(totals.get('approval_lost_list', []))
+
+        # Helper to create report with formatting
+        def create_report(keys, report_type):
+            if not keys:
+                logging.info(f"No {report_type} classrooms - skipping report")
+                return None
+
+            # Filter master dataframe for classrooms in the list
+            df_report = df_master[df_master['key_sf'].isin(keys)].copy()
+
+            # Drop the internal key column before writing
+            if 'key_sf' in df_report.columns:
+                df_report = df_report.drop(columns=['key_sf'])
+
+            # Create filename
+            filename = f"{timestamp}_{report_type}.xlsx"
+            report_path = reports_dir / filename
+
+            # Write to Excel with formatting
+            with pd.ExcelWriter(report_path, engine='openpyxl') as writer:
+                df_report.to_excel(writer, index=False, sheet_name=report_type)
+                ws = writer.sheets[report_type]
+
+                # Apply conditional formatting matching master file
+                red_font = Font(color="FF0000")
+                red_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+                orange_fill = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+                green_fill = PatternFill(start_color="66FF99", end_color="66FF99", fill_type="solid")
+                yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+                gray_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+
+                # Get column indices (openpyxl uses 1-based indexing)
+                col_map = {col: idx + 1 for idx, col in enumerate(df_report.columns)}
+
+                # Apply formatting to data rows (skip header)
+                data_rows = len(df_report)
+                for row_idx in range(2, data_rows + 2):  # Start at row 2 (after header)
+
+                    # Column M (Mark if Void) - red text if not empty
+                    if "Mark if Void" in col_map:
+                        cell = ws.cell(row=row_idx, column=col_map["Mark if Void"])
+                        if cell.value and str(cell.value).strip():
+                            cell.font = red_font
+
+                    # Column O (Change Control) - color fills
+                    if "Change Control" in col_map:
+                        cell = ws.cell(row=row_idx, column=col_map["Change Control"])
+                        val = str(cell.value or "").strip()
+                        if val == "Missing - Camera Active":
+                            cell.fill = red_fill
+                        elif val == "Approval Lost":
+                            cell.fill = orange_fill
+                        elif val == "Approval Gained":
+                            cell.fill = green_fill
+                        elif "Missing" in val:
+                            cell.fill = yellow_fill
+
+                    # Column Q (Approval Status) - color fills and fonts
+                    if "Approval Status" in col_map:
+                        cell = ws.cell(row=row_idx, column=col_map["Approval Status"])
+                        val = str(cell.value or "").strip()
+                        if val == "Approved - Camera Authorized":
+                            cell.fill = green_fill
+                        elif val == "Denied - Parent Opt Out":
+                            cell.font = red_font
+                        elif val == "Void":
+                            cell.font = red_font
+                        elif val == "Ineligible - FISH List N":
+                            cell.fill = gray_fill
+                            cell.font = red_font
+
+                # Auto-adjust column widths
+                for column in ws.columns:
+                    max_length = 0
+                    column_letter = column[0].column_letter
+                    for cell in column:
+                        try:
+                            if len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except:
+                            pass
+                    adjusted_width = min(max_length + 2, 50)
+                    ws.column_dimensions[column_letter].width = adjusted_width
+
+            logging.info(f"Generated {report_type} report: {filename}")
+            logging.info(f"  Classrooms: {len(df_report)}")
+            return report_path
+
+        # Generate both reports
+        logging.info("\n" + "=" * 70)
+        logging.info("Generating Action Reports for ESE Team")
+        logging.info("=" * 70)
+
+        gained_path = create_report(gained_keys, "Approval_Gained")
+        lost_path = create_report(lost_keys, "Approval_Lost")
+
+        if gained_path or lost_path:
+            logging.info(f"\nAction reports saved to: {reports_dir}")
+        else:
+            logging.info("\nNo action reports generated (no approval changes)")
+
 
 def main():
+    def _print_changes(items):
+        """Robust printer for approval lists that handles both tuples and strings."""
+        for it in items:
+            if isinstance(it, tuple) and len(it) == 3:
+                _, _, info = it
+                print(f"    - {info}")
+            else:
+                print(f"    - {it}")
+
     print("=" * 70)
     print("TASK 2: Merge Processed Reports into Master Tracking")
     print("(Enhanced with Retention System for Installed/Active Cameras)")
@@ -1194,14 +1381,10 @@ def main():
                 print(f"  [OK] Added: {stats['added']}")
             if stats['approval_gained'] > 0:
                 print(f"  [OK] Approval Gained: {stats['approval_gained']}")
-                # Show which classrooms gained approval
-                for classroom in stats['approval_gained_list']:
-                    print(f"    - {classroom}")
+                _print_changes(stats['approval_gained_list'])
             if stats['approval_lost'] > 0:
                 print(f"  [WARNING]  Approval Lost: {stats['approval_lost']}")
-                # Show which classrooms lost approval
-                for classroom in stats['approval_lost_list']:
-                    print(f"    - {classroom}")
+                _print_changes(stats['approval_lost_list'])
             if stats['status_changed'] > 0:
                 print(f"  * Status Changed: {stats['status_changed']}")
             if stats['no_change'] > 0:
@@ -1283,14 +1466,12 @@ def main():
             print(f"  * Added (new classrooms): {totals['added']}")
             if totals['approval_gained'] > 0:
                 print(f"  * Approval Gained: {totals['approval_gained']}")
-                for classroom in totals['approval_gained_list']:
-                    print(f"    - {classroom}")
+                _print_changes(totals['approval_gained_list'])
             else:
                 print(f"  * Approval Gained: {totals['approval_gained']}")
             if totals['approval_lost'] > 0:
                 print(f"  * Approval Lost: {totals['approval_lost']}")
-                for classroom in totals['approval_lost_list']:
-                    print(f"    - {classroom}")
+                _print_changes(totals['approval_lost_list'])
             else:
                 print(f"  * Approval Lost: {totals['approval_lost']}")
             print(f"  * Status Changed: {totals['status_changed']}")
@@ -1345,6 +1526,20 @@ def main():
         except Exception as e:
             print(f"[WARNING] Timeline generation failed: {e}")
             logging.warning(f"Timeline generation error: {e}")
+
+    # Generate action reports for ESE team (if there were any approval changes)
+    if merged > 0 and (totals['approval_gained'] > 0 or totals['approval_lost'] > 0):
+        print("\n[REPORTS] Generating action reports for ESE team...")
+        try:
+            merger.generate_action_reports(df_master, totals)
+            # Print actual configured path
+            cfg_reports = merger.config.get('paths', {}).get('reports_dir', '')
+            reports_path = Path(cfg_reports).expanduser().resolve() if cfg_reports else (
+                    merger.master_file.parent / 'ESE' / 'Reports')
+            print(f"[OK] Action reports directory: {reports_path}")
+        except Exception as e:
+            print(f"[WARNING] Action reports generation failed: {e}")
+            logging.warning(f"Action reports generation error: {e}")
 
 
 if __name__ == "__main__":
