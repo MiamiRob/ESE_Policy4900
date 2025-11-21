@@ -454,11 +454,13 @@ class MasterMerger:
 
         # Column Q
         rule_q_green = CellIsRule(operator="equal", formula=['"Approved - Camera Authorized"'], fill=green_fill)
+        rule_q_orange = CellIsRule(operator="equal", formula=['"Approval Lost"'], fill=orange_fill)
         rule_q_denied = CellIsRule(operator="equal", formula=['"Denied - Parent Opt Out"'], font=red_font)
         rule_q_void = CellIsRule(operator="equal", formula=['"Void"'], font=red_font)
         rule_q_ineligible = CellIsRule(operator="equal", formula=['"Ineligible - FISH List N"'], fill=gray_fill,
                                        font=red_font)
         ws.conditional_formatting.add(f"{col_Q}{start_row}:{col_Q}{end_row}", rule_q_green)
+        ws.conditional_formatting.add(f"{col_Q}{start_row}:{col_Q}{end_row}", rule_q_orange)
         ws.conditional_formatting.add(f"{col_Q}{start_row}:{col_Q}{end_row}", rule_q_denied)
         ws.conditional_formatting.add(f"{col_Q}{start_row}:{col_Q}{end_row}", rule_q_void)
         ws.conditional_formatting.add(f"{col_Q}{start_row}:{col_Q}{end_row}", rule_q_ineligible)
@@ -569,6 +571,27 @@ class MasterMerger:
                 new_approval = self.calculate_approval_status(df_master.iloc[i])
                 df_master.at[i, "Approval Status"] = new_approval
 
+                # CRITICAL: Approval Status Override Precedence (highest to lowest):
+                # 1. Void (room is OUT of Policy 4900 program)
+                # 2. FISH List N (structural impossibility - cannot install camera)
+                # 3. Approval Lost (unacknowledged alert - only if not Void or N)
+                # 4. Calculated status (normal operation)
+                change_control = str(df_master.at[i, "Change Control"] or "").strip()
+                change_ack = str(df_master.at[i, "Change Ack"] or "").strip()
+                mark_void = str(df_master.at[i, "Mark if Void"] or "").strip().lower()
+                fish_list = str(df_master.at[i, "FISH List"] or "").strip().upper()
+
+                if mark_void == "void":
+                    # Void always wins - room is out of program
+                    df_master.at[i, "Approval Status"] = "Void"
+                elif fish_list == "N":
+                    # FISH List N overrides everything except Void
+                    df_master.at[i, "Approval Status"] = "Ineligible - FISH List N"
+                elif change_control == "Approval Lost" and not change_ack:
+                    # Approval Lost override (only if not Void or N)
+                    df_master.at[i, "Approval Status"] = "Approval Lost"
+                # Otherwise leave calculated value
+
                 # If approved and first time, set dates
                 if new_approval == "Approved - Camera Authorized":
                     existing = df_master.at[i, "Date Added to Installation List"]
@@ -642,6 +665,27 @@ class MasterMerger:
                 # Calculate Approval Status for new classroom (do this BEFORE date logic)
                 new_row["Approval Status"] = self.calculate_approval_status(row)
 
+                # CRITICAL: Approval Status Override Precedence (highest to lowest):
+                # 1. Void (room is OUT of Policy 4900 program)
+                # 2. FISH List N (structural impossibility - cannot install camera)
+                # 3. Approval Lost (unacknowledged alert - only if not Void or N)
+                # 4. Calculated status (normal operation)
+                change_control = str(new_row.get("Change Control", "")).strip()
+                change_ack = str(new_row.get("Change Ack", "")).strip()
+                mark_void = str(new_row.get("Mark if Void", "")).strip().lower()
+                fish_list = str(new_row.get("FISH List", "")).strip().upper()
+
+                if mark_void == "void":
+                    # Void always wins - room is out of program
+                    new_row["Approval Status"] = "Void"
+                elif fish_list == "N":
+                    # FISH List N overrides everything except Void
+                    new_row["Approval Status"] = "Ineligible - FISH List N"
+                elif change_control == "Approval Lost" and not change_ack:
+                    # Approval Lost override (only if not Void or N)
+                    new_row["Approval Status"] = "Approval Lost"
+                # Otherwise leave calculated value
+
                 # Date fields that depend on being approved
                 if new_row["Approval Status"] == "Approved - Camera Authorized":
                     new_row["Date Added to Installation List"] = report_date
@@ -664,6 +708,28 @@ class MasterMerger:
                         df_master.at[i, "Mark if Void"] = "Void"
                         # Recalculate Approval Status after marking as Void
                         df_master.at[i, "Approval Status"] = self.calculate_approval_status(df_master.iloc[i])
+
+                        # CRITICAL: Approval Status Override Precedence (highest to lowest):
+                        # 1. Void (room is OUT of Policy 4900 program)
+                        # 2. FISH List N (structural impossibility - cannot install camera)
+                        # 3. Approval Lost (unacknowledged alert - only if not Void or N)
+                        # 4. Calculated status (normal operation)
+                        change_control = str(df_master.at[i, "Change Control"] or "").strip()
+                        change_ack = str(df_master.at[i, "Change Ack"] or "").strip()
+                        mark_void_check = str(df_master.at[i, "Mark if Void"] or "").strip().lower()
+                        fish_list = str(df_master.at[i, "FISH List"] or "").strip().upper()
+
+                        if mark_void_check == "void":
+                            # Void always wins - room is out of program
+                            df_master.at[i, "Approval Status"] = "Void"
+                        elif fish_list == "N":
+                            # FISH List N overrides everything except Void
+                            df_master.at[i, "Approval Status"] = "Ineligible - FISH List N"
+                        elif change_control == "Approval Lost" and not change_ack:
+                            # Approval Lost override (only if not Void or N)
+                            df_master.at[i, "Approval Status"] = "Approval Lost"
+                        # Otherwise leave calculated value
+
                         stats["manual_void_applied"] += 1
                     # Do not overwrite protected columns
 

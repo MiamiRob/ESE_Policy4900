@@ -1,4 +1,4 @@
-# run_policy4900_pipeline.py
+# orchestrator_policy4900.py
 
 """
 Policy 4900 Processing Pipeline Orchestrator
@@ -6,10 +6,10 @@ Policy 4900 Processing Pipeline Orchestrator
 Runs Task1 and Task2 in sequence with error handling and flexible execution modes.
 
 USAGE:
-  python run_policy4900_pipeline.py              # Run both Task1 → Task2
-  python run_policy4900_pipeline.py --step1      # Run Task1 only (process CSVs)
-  python run_policy4900_pipeline.py --step2      # Run Task2 only (merge to master)
-  python run_policy4900_pipeline.py --help       # Show this help
+  python orchestrator_policy4900.py              # Run both Task1 → Task2
+  python orchestrator_policy4900.py --step1      # Run Task1 only (process CSVs)
+  python orchestrator_policy4900.py --step2      # Run Task2 only (merge to master)
+  python orchestrator_policy4900.py --help       # Show this help
 
 WORKFLOW:
   Task1: Process raw *_Policy4900.csv → *_Policy4900_PROCESSED.csv + .step1 markers
@@ -91,24 +91,24 @@ def main():
         epilog="""
 EXAMPLES:
   # Normal operation - run both steps with validation (RECOMMENDED)
-  python run_policy4900_pipeline.py
+  python orchestrator_policy4900.py
 
   # Process new CSV reports only (includes validation)
-  python run_policy4900_pipeline.py --step1
+  python orchestrator_policy4900.py --step1
 
   # Skip validation (not recommended for production)
-  python run_policy4900_pipeline.py --no-validate
+  python orchestrator_policy4900.py --no-validate
 
   # Merge previously processed files only (no validation)
-  python run_policy4900_pipeline.py --step2
+  python orchestrator_policy4900.py --step2
 
   # Run validation only on existing processed files
-  python run_policy4900_pipeline.py --validate
+  python orchestrator_policy4900.py --validate
 
   # Review workflow (recommended for production)
-  python run_policy4900_pipeline.py --step1    # Process + validate CSVs
+  python orchestrator_policy4900.py --step1    # Process + validate CSVs
   # <manually review *_PROCESSED.csv files>
-  python run_policy4900_pipeline.py --step2    # Merge after review
+  python orchestrator_policy4900.py --step2    # Merge after review
         """
     )
 
