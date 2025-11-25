@@ -49,6 +49,7 @@
             "% No Response",
             "# of ESE Students",
             "Mark if Void",
+            "Report Date",
             "Date First Seen",
             "Change Control",
             "Change Ack",
@@ -93,7 +94,14 @@
             "Void",
             "Not Requested",
             "Ineligible - FISH List N",
-            "Withdrawn"
+            "Withdrawn",
+            "Approval Lost",
+            "Missing - Camera Active",
+            "Missing - Camera Installed",
+            "Missing - Camera Pending",
+            "Missing - No Camera",
+            "Missing - No Approval",
+            "Missing - FISH List N"
         ]
     },
     "timeline": {
@@ -115,6 +123,7 @@
         "strict_schema": true,
         "require_validation": true,
         "swing_threshold_pct": 50,
+        "min_student_delta": 2,
         "max_students_per_room": 500,
         "artifacts_dir": "C:\\BCPS\\ESE\\Validation_Artifacts"
     }
