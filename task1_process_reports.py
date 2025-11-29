@@ -58,8 +58,7 @@ class ReportProcessor:
 
         new_reports_dir = io.get("new_reports_dir") or paths.get("new_reports_dir") or "."
         self.new_reports_dir = Path(new_reports_dir).expanduser().resolve()
-
-        logging.info(f"New reports directory: {self.new_reports_dir}")
+        # Note: Directory path is logged in main() after logging is configured
 
         # Column definitions
         columns_cfg = self.config.get("columns", {})
@@ -148,10 +147,10 @@ class ReportProcessor:
         for csv_path in all_csvs:
             step1_marker = csv_path.parent / f"{csv_path.name}.step1"
             if step1_marker.exists():
-                logging.info(f"  Ã¢Å“â€œ Already processed (step1): {csv_path.name}")
+                logging.info(f"  [OK] Already processed (step1): {csv_path.name}")
             else:
-                logging.info(f"  Ã¢â€ â€™ Ready for processing: {csv_path.name}")
-                unprocessed.append(csv_path)
+                logging.info(f"  [PENDING] Ready for processing: {csv_path.name}")
+                unprocessed.append(csv_path)  # <-- this line was missing
 
         logging.info(f"Unprocessed reports: {len(unprocessed)}")
         return unprocessed
@@ -205,9 +204,9 @@ class ReportProcessor:
 
         logging.info(f"  Columns present: {len(present)}/{len(self.report_columns)}")
 
-        # Cast identifier columns to string
+        # Cast identifier columns to string (fillna BEFORE astype to avoid "nan" strings)
         for col in ["School of Instruction", "FISH Number", "Room", "FISH List"]:
-            df[col] = df[col].astype(str).fillna("")
+            df[col] = df[col].fillna("").astype(str).str.strip()
 
         # Cast numeric count columns
         for col in [
@@ -265,7 +264,10 @@ class ReportProcessor:
         # NEW CODE - Populate Report Date from filename
         report_date = self.extract_date_from_filename(report_path.name)
         df["Report Date"] = report_date.strftime(self.date_format)
-        logging.info(f"  Set Report Date: {df['Report Date'].iloc[0]}")
+        if len(df) == 0:
+            logging.info(f"  Empty report (no rows). Report Date set to: {report_date.strftime(self.date_format)}")
+        else:
+            logging.info(f"  Set Report Date: {df['Report Date'].iloc[0]}")
 
         # Reorder columns to match master column order
         final_cols = [c for c in self.master_columns if c in df.columns]
@@ -336,7 +338,7 @@ class ReportProcessor:
         # Write to CSV (UTF-8 encoding, no index)
         df.to_csv(output_path, index=False, encoding="utf-8")
 
-        logging.info(f"  Ã¢Å“â€œ Created: {output_path}")
+        logging.info(f" Created: {output_path}")
         return output_path
 
     def create_step1_marker(self, original_path: Path, processed_path: Path, df: pd.DataFrame):
@@ -355,7 +357,7 @@ class ReportProcessor:
         with open(marker_path, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
 
-        logging.info(f"  Ã¢Å“â€œ Created marker: {marker_path.name}")
+        logging.info(f" Created marker: {marker_path.name}")
         return marker_path
 
     @staticmethod
@@ -382,7 +384,7 @@ def main():
     reports = processor.get_unprocessed_reports()
 
     if not reports:
-        logging.info("\nÃ¢Å“â€œ No new reports to process")
+        logging.info("\nNo new reports to process")
         logging.info("\n" + "=" * 70)
         logging.info("   Task 1 Complete - Nothing to Process")
         logging.info("=" * 70)
@@ -422,7 +424,7 @@ def main():
     logging.info("")
 
     if processed_count > 0:
-        logging.info("Ã¢Å“â€œ Review the *_PROCESSED.csv files before running Task 2")
+        logging.info("  Review the *_PROCESSED.csv files before running Task 2")
 
     logging.info("=" * 70)
 

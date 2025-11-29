@@ -59,6 +59,7 @@
             "Authorized Date",
             "Previous Approval Status",
             "Approval Status",
+            "Parent Consent Status",
             "Date Added to Installation List",
             "Installation Status",
             "Installation Date",
@@ -94,7 +95,6 @@
             "Void",
             "Not Requested",
             "Ineligible - FISH List N",
-            "Withdrawn",
             "Approval Lost",
             "Missing - Camera Active",
             "Missing - Camera Installed",
@@ -102,6 +102,10 @@
             "Missing - No Camera",
             "Missing - No Approval",
             "Missing - FISH List N"
+        ],
+        "valid_consent_statuses": [
+            "Granted",
+            "Withdrawn"
         ]
     },
     "timeline": {

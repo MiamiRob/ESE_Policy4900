@@ -1,4 +1,4 @@
-# task2_merge_to_master_enhanced.py
+# task2_merge_to_master_with_timeline.py
 """
 TASK 2: Merge processed reports into the master tracking workbook
 ENHANCED WITH RETENTION SYSTEM for installed/active cameras
@@ -99,10 +99,16 @@ class MasterMerger:
             "# of ESE Students", "Mark if Void", "Date First Seen", "Change Control",
             "Change Ack", "Change First Seen", "Last Status Change",
             "Last Seen In Reports", "Authorized Date",
-            "Previous Approval Status", "Approval Status", "Date Added to Installation List",
+            "Previous Approval Status", "Approval Status", "Parent Consent Status",
+            "Date Added to Installation List",
             "Installation Status", "Installation Date", "Activation Status", "Activation Date",
             "Camera Source School", "Camera Source Classroom", "Camera Type", "Notes"
         ]
+
+        # Safety net: ensure Parent Consent Status is always present (even if config is outdated)
+        if "Parent Consent Status" not in self.master_columns:
+            idx = self.master_columns.index("Approval Status") + 1
+            self.master_columns.insert(idx, "Parent Consent Status")
 
         # Never overwrite these fields programmatically during merge
         self.protected_columns = [
@@ -485,15 +491,12 @@ class MasterMerger:
     @staticmethod
     def calculate_approval_status(row) -> str:
         """Calculate Approval Status from raw data."""
-        # Check for Withdrawn first (hard blocker)
-        consent_status = str(row.get("Parent Consent Status", "")).lower()
-        withdrawn = "withdraw" in consent_status
-        if withdrawn:
-            return "Withdrawn"
+        # NOTE: Parent Consent Status is tracked SEPARATELY as a persistent state column
+        # It is not used as input to Approval Status calculation
 
-        # Check for manual Void
-        mark_void = str(row.get("Mark if Void", "")).strip().lower()
-        if mark_void == "void":
+        # Check for manual Void (consistent with Task1's logic)
+        mark_void = str(row.get("Mark if Void", "") or "").strip().lower()
+        if mark_void in {"y", "yes", "void", "true", "1"} or "void" in mark_void:
             return "Void"
 
         # Check FISH List (infrastructure constraint)
@@ -571,27 +574,6 @@ class MasterMerger:
                 new_approval = self.calculate_approval_status(df_master.iloc[i])
                 df_master.at[i, "Approval Status"] = new_approval
 
-                # CRITICAL: Approval Status Override Precedence (highest to lowest):
-                # 1. Void (room is OUT of Policy 4900 program)
-                # 2. FISH List N (structural impossibility - cannot install camera)
-                # 3. Approval Lost (unacknowledged alert - only if not Void or N)
-                # 4. Calculated status (normal operation)
-                change_control = str(df_master.at[i, "Change Control"] or "").strip()
-                change_ack = str(df_master.at[i, "Change Ack"] or "").strip()
-                mark_void = str(df_master.at[i, "Mark if Void"] or "").strip().lower()
-                fish_list = str(df_master.at[i, "FISH List"] or "").strip().upper()
-
-                if mark_void == "void":
-                    # Void always wins - room is out of program
-                    df_master.at[i, "Approval Status"] = "Void"
-                elif fish_list == "N":
-                    # FISH List N overrides everything except Void
-                    df_master.at[i, "Approval Status"] = "Ineligible - FISH List N"
-                elif change_control == "Approval Lost" and not change_ack:
-                    # Approval Lost override (only if not Void or N)
-                    df_master.at[i, "Approval Status"] = "Approval Lost"
-                # Otherwise leave calculated value
-
                 # If approved and first time, set dates
                 if new_approval == "Approved - Camera Authorized":
                     existing = df_master.at[i, "Date Added to Installation List"]
@@ -616,7 +598,9 @@ class MasterMerger:
                     # Always flag new transitions
                     label = "Approval Gained" if transition_gained else "Approval Lost"
                     df_master.at[i, "Change Control"] = label
-                    if not str(df_master.at[i, "Change First Seen"] or "").strip():
+                    # Set Change First Seen only if not already set (fix NaN handling)
+                    existing_cfs = df_master.at[i, "Change First Seen"]
+                    if pd.isna(existing_cfs) or str(existing_cfs).strip() == "":
                         df_master.at[i, "Change First Seen"] = report_date
                     df_master.at[i, "Last Status Change"] = report_date
                     # Clear any old ACK; it was for a prior change
@@ -631,9 +615,13 @@ class MasterMerger:
                     if transition_gained:
                         stats["approval_gained"] += 1
                         stats["approval_gained_list"].append((k, report_date, classroom_info))
+                        # Set Parent Consent Status to "Granted" - they reached 100%
+                        df_master.at[i, "Parent Consent Status"] = "Granted"
                     else:
                         stats["approval_lost"] += 1
                         stats["approval_lost_list"].append((k, report_date, classroom_info))
+                        # Set Parent Consent Status to "Withdrawn" - they dropped below 100%
+                        df_master.at[i, "Parent Consent Status"] = "Withdrawn"
                 else:
                     # No new transition this run
                     if ack:
@@ -652,6 +640,26 @@ class MasterMerger:
                         else:
                             df_master.at[i, "Change Control"] = "No Change"
                             stats["no_change"] += 1
+
+                # CRITICAL: Final Approval Status Override Precedence (runs AFTER transitions)
+                # This must run after Change Control is updated, so regained approval isn't
+                # incorrectly overwritten by stale "Approval Lost" from yesterday
+                # Priority: 1. Void  2. FISH List N  3. Unacknowledged Approval Lost  4. Calculated
+                change_control = str(df_master.at[i, "Change Control"] or "").strip()
+                change_ack = str(df_master.at[i, "Change Ack"] or "").strip()
+                mark_void = str(df_master.at[i, "Mark if Void"] or "").strip().lower()
+                fish_list = str(df_master.at[i, "FISH List"] or "").strip().upper()
+
+                if mark_void == "void":
+                    # Void always wins - room is out of program
+                    df_master.at[i, "Approval Status"] = "Void"
+                elif fish_list == "N":
+                    # FISH List N overrides everything except Void
+                    df_master.at[i, "Approval Status"] = "Ineligible - FISH List N"
+                elif change_control == "Approval Lost" and not change_ack:
+                    # Approval Lost override (only if not Void or N)
+                    df_master.at[i, "Approval Status"] = "Approval Lost"
+                # Otherwise leave calculated value (Approved/Denied/Awaiting/Not Requested)
 
             else:
                 # New classroom - use loc to append directly (avoids concat FutureWarning)
@@ -690,8 +698,12 @@ class MasterMerger:
                 if new_row["Approval Status"] == "Approved - Camera Authorized":
                     new_row["Date Added to Installation List"] = report_date
                     new_row["Authorized Date"] = report_date
+                    # New classroom starting at 100% - set Parent Consent Status to "Granted"
+                    new_row["Parent Consent Status"] = "Granted"
                 else:
                     new_row["Authorized Date"] = ""
+                    # New classroom not at 100% - leave Parent Consent Status blank
+                    new_row["Parent Consent Status"] = ""
 
                 # Append using loc instead of concat (more efficient, avoids FutureWarning)
                 next_idx = len(df_master)
@@ -797,8 +809,9 @@ class MasterMerger:
             # Persistent state: always show the missing label
             df_master.at[i, "Change Control"] = label
 
-            # Track when this missing state was first seen
-            if not str(df_master.at[i, "Change First Seen"] or "").strip():
+            # Track when this missing state was first seen (fix NaN handling)
+            existing_cfs = df_master.at[i, "Change First Seen"]
+            if pd.isna(existing_cfs) or str(existing_cfs).strip() == "":
                 df_master.at[i, "Change First Seen"] = report_date
             df_master.at[i, "Last Status Change"] = report_date
 
