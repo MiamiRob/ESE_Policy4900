@@ -273,6 +273,23 @@ class MasterMerger:
             if col not in df.columns:
                 df[col] = ""
 
+        # CRITICAL: Cast all text columns to string dtype to prevent FutureWarnings
+        # When Excel has empty columns, pandas reads them as float64
+        # Assigning strings to float64 columns triggers deprecation warnings
+        string_columns = [
+            "School of Instruction", "FISH Number", "Room", "FISH List",
+            "Mark if Void", "Report Date", "Date First Seen", "Change Control",
+            "Change Ack", "Change First Seen", "Last Status Change", "Last Seen In Reports",
+            "Authorized Date", "Previous Approval Status", "Approval Status",
+            "Parent Consent Status", "Date Added to Installation List",
+            "Installation Status", "Installation Date", "Activation Status",
+            "Activation Date", "Camera Source School", "Camera Source Classroom",
+            "Camera Type", "Notes"
+        ]
+        for col in string_columns:
+            if col in df.columns:
+                df[col] = df[col].fillna("").astype(str)
+
         # Ensure key columns are clean strings
         for col in ["School of Instruction", "Room", "FISH Number"]:
             if col not in df.columns:
