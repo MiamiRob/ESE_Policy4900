@@ -99,6 +99,7 @@ class MasterMerger:
             "# of ESE Students", "Mark if Void", "Date First Seen", "Change Control",
             "Change Ack", "Change First Seen", "Last Status Change",
             "Last Seen In Reports", "Authorized Date",
+            "Last Fully Approved Date", "Days Since Fully Approved",
             "Previous Approval Status", "Approval Status", "Parent Consent Status",
             "Date Added to Installation List",
             "Installation Status", "Installation Date", "Activation Status", "Activation Date",
@@ -300,7 +301,8 @@ class MasterMerger:
         df["key_sf"] = self._mk_key_frame(df)
 
         for col in ["Previous Approval Status", "Date First Seen", "Change Control",
-                    "Change Ack", "Change First Seen", "Last Status Change"]:
+                    "Change Ack", "Change First Seen", "Last Status Change",
+                    "Last Fully Approved Date", "Days Since Fully Approved"]:
             if col not in df.columns:
                 df[col] = ""
 
@@ -337,6 +339,58 @@ class MasterMerger:
         cols = [c for c in self.master_columns if c in df.columns]
         percent_cols = ["% Opt In", "% Opt Out", "% No Response"]
         df_out = df[cols].copy()
+
+        # =====================================================================
+        # CRITICAL FIX: Normalize all date columns to clean string format
+        # This prevents "2025-11-03 00:00:00" from appearing in Excel
+        # =====================================================================
+        date_cols = [
+            "Report Date", "Date First Seen", "Last Seen In Reports",
+            "Authorized Date", "Last Fully Approved Date", "Change First Seen",
+            "Last Status Change", "Date Added to Installation List",
+            "Installation Date", "Activation Date"
+        ]
+
+        def clean_date_for_excel(val):
+            """Convert date values to clean MM-DD-YYYY format without time component."""
+            if pd.isna(val) or val == "":
+                return ""
+            # Handle special string values that should pass through unchanged
+            str_val = str(val).strip()
+            if str_val.lower() in ("", "void", "tbd", "not applicable", "n/a"):
+                return str_val
+            try:
+                # Handle Timestamp objects, datetime objects, and strings with time component
+                # Examples: "2025-11-03 00:00:00", Timestamp('2025-11-03'), "11-03-2025"
+                if isinstance(val, pd.Timestamp):
+                    return val.strftime(self.date_format)
+                elif isinstance(val, datetime):
+                    return val.strftime(self.date_format)
+                else:
+                    # String - might have " 00:00:00" appended or be in wrong format
+                    str_val = str(val).split(" ")[0]  # Remove time component if present
+                    # Try parsing as YYYY-MM-DD first (ISO format from pandas)
+                    try:
+                        dt = datetime.strptime(str_val, "%Y-%m-%d")
+                        return dt.strftime(self.date_format)
+                    except ValueError:
+                        pass
+                    # Try parsing as MM-DD-YYYY (our target format)
+                    try:
+                        dt = datetime.strptime(str_val, "%m-%d-%Y")
+                        return dt.strftime(self.date_format)
+                    except ValueError:
+                        pass
+                    # Return as-is if unparseable (might be special value)
+                    return str(val)
+            except Exception:
+                return str(val)  # Return as-is if anything fails
+
+        for col in date_cols:
+            if col in df_out.columns:
+                df_out[col] = df_out[col].apply(clean_date_for_excel)
+        # =====================================================================
+
         for col in percent_cols:
             if col in df_out.columns:
                 # Only divide by 100 if values are > 1 (whole numbers like 75, not decimals like 0.75)
@@ -372,7 +426,9 @@ class MasterMerger:
             "Change Ack",  # Manual acknowledgment - should start fresh
             "Change Control",  # Current change status - should start fresh
             "Change First Seen",  # Temporary tracking - should start fresh
-            "Last Status Change"  # Temporary tracking - should start fresh
+            "Last Status Change",  # Temporary tracking - should start fresh
+            "Last Fully Approved Date",  # Derived from approval history
+            "Days Since Fully Approved"  # Derived from approval history
         }
 
         # Only retain permanent camera installation data
@@ -407,6 +463,32 @@ class MasterMerger:
                 merged = df_keep
         else:
             merged = df_keep
+
+        # =====================================================================
+        # FIX: Normalize all date columns to clean string format (no time component)
+        # This prevents "2025-10-08 00:00:00" from appearing in the CSV
+        # =====================================================================
+        date_cols = [
+            "Report Date", "Date First Seen", "Last Seen In Reports",
+            "Authorized Date", "Date Added to Installation List",
+            "Installation Date", "Activation Date"
+        ]
+
+        def clean_date(val):
+            """Convert date values to clean MM-DD-YYYY format without time component."""
+            if pd.isna(val) or val == "" or val == "Not Applicable":
+                return str(val) if val == "Not Applicable" else ""
+            try:
+                # Handle "2025-11-03 00:00:00", "2025-11-03", and Timestamp objects
+                dt = pd.to_datetime(str(val).split(" ")[0])
+                return dt.strftime(self.date_format)
+            except:
+                return str(val)  # Return as-is if unparseable
+
+        for col in date_cols:
+            if col in merged.columns:
+                merged[col] = merged[col].apply(clean_date)
+        # =====================================================================
 
         # Write updated retention file
         try:
@@ -591,6 +673,10 @@ class MasterMerger:
                 new_approval = self.calculate_approval_status(df_master.iloc[i])
                 df_master.at[i, "Approval Status"] = new_approval
 
+                # Track the last calendar day this classroom was fully approved
+                if new_approval == "Approved - Camera Authorized":
+                    df_master.at[i, "Last Fully Approved Date"] = report_date
+
                 # If approved and first time, set dates
                 if new_approval == "Approved - Camera Authorized":
                     existing = df_master.at[i, "Date Added to Installation List"]
@@ -715,10 +801,12 @@ class MasterMerger:
                 if new_row["Approval Status"] == "Approved - Camera Authorized":
                     new_row["Date Added to Installation List"] = report_date
                     new_row["Authorized Date"] = report_date
+                    new_row["Last Fully Approved Date"] = report_date
                     # New classroom starting at 100% - set Parent Consent Status to "Granted"
                     new_row["Parent Consent Status"] = "Granted"
                 else:
                     new_row["Authorized Date"] = ""
+                    new_row["Last Fully Approved Date"] = ""
                     # New classroom not at 100% - leave Parent Consent Status blank
                     new_row["Parent Consent Status"] = ""
 
@@ -854,6 +942,52 @@ class MasterMerger:
                         df_master.at[i, "Authorized Date"] = report_date
                         logging.info(
                             f"Backfilled Authorized Date for {r.get('School of Instruction')} - {r.get('Room')}: {report_date} (fallback)")
+
+        # Derive "Days Since Fully Approved" as of this report date
+        try:
+            report_dt = datetime.strptime(report_date, self.date_format).date()
+        except Exception:
+            report_dt = None
+
+        if report_dt is not None:
+            for i, r in df_master.iterrows():
+                approval = str(r.get("Approval Status", "") or "").strip()
+                last_full_val = r.get("Last Fully Approved Date", "")
+
+                last_full_date = None
+
+                # Normalize Last Fully Approved Date
+                if pd.isna(last_full_val) or str(last_full_val).strip() == "":
+                    # If currently approved and no last-full date, initialize it to today
+                    if approval == "Approved - Camera Authorized":
+                        last_full_date = report_dt
+                        df_master.at[i, "Last Fully Approved Date"] = report_date
+                else:
+                    if isinstance(last_full_val, pd.Timestamp):
+                        last_full_date = last_full_val.date()
+                    elif isinstance(last_full_val, datetime):
+                        last_full_date = last_full_val.date()
+                    else:
+                        # Try parsing string values
+                        try:
+                            last_full_date = datetime.strptime(str(last_full_val), self.date_format).date()
+                        except Exception:
+                            last_full_date = None
+
+                # Compute the day difference
+                if last_full_date is not None and report_dt >= last_full_date:
+                    df_master.at[i, "Days Since Fully Approved"] = (report_dt - last_full_date).days
+                else:
+                    df_master.at[i, "Days Since Fully Approved"] = ""
+
+        # Backfill Parent Consent Status for already-approved classrooms
+        # If a room is currently Approved and Parent Consent Status is blank,
+        # treat it as Granted (they are at 100% now and at some point reached 100%).
+        for i, r in df_master.iterrows():
+            approval = str(r.get("Approval Status", "") or "").strip()
+            consent = str(r.get("Parent Consent Status", "") or "").strip()
+            if approval == "Approved - Camera Authorized" and consent == "":
+                df_master.at[i, "Parent Consent Status"] = "Granted"
 
         return df_master, stats
 

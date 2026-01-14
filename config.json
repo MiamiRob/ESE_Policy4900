@@ -57,6 +57,8 @@
             "Last Status Change",
             "Last Seen In Reports",
             "Authorized Date",
+            "Last Fully Approved Date",
+            "Days Since Fully Approved",
             "Previous Approval Status",
             "Approval Status",
             "Parent Consent Status",
