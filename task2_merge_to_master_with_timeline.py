@@ -497,6 +497,43 @@ class MasterMerger:
         except Exception as e:
             logging.error(f"Failed to write retention file: {e}")
 
+    # -------------------- standalone ACK consumption --------------------
+
+    def consume_pending_acks(self) -> int:
+        """
+        Consume all pending Change Ack values in the master file.
+
+        This runs independently of report merging so that ACK values are
+        consumed even when there are no new reports to process.  Without
+        this, a user who types "ACK" in the master between pipeline runs
+        would never see the acknowledgment take effect.
+
+        Returns the number of ACK values consumed.
+        """
+        if not self.master_file.exists():
+            return 0
+
+        df = self.load_master()
+
+        # Ensure Change Ack column is clean string
+        if "Change Ack" not in df.columns:
+            return 0
+        df["Change Ack"] = df["Change Ack"].fillna("").astype(str).str.strip()
+
+        ack_mask = df["Change Ack"] != ""
+        count = ack_mask.sum()
+
+        if count == 0:
+            return 0
+
+        # Consume each ACK: clear Change Control and Change Ack
+        for i in df[ack_mask].index:
+            df.at[i, "Change Control"] = "No Change"
+            df.at[i, "Change Ack"] = ""
+
+        self._write_master(df)
+        return count
+
     # -------------------- excel formatting --------------------
 
     def _apply_excel_formatting(self, data_row_count: int):
@@ -1577,6 +1614,13 @@ def main():
     if merger.overrides_file:
         print(f"[VOID] Void overrides: {merger.overrides_file}")
     print()
+
+    # Consume any pending ACK values regardless of whether new reports exist
+    ack_count = merger.consume_pending_acks()
+    if ack_count > 0:
+        print(f"[OK] Consumed {ack_count} pending Change Ack value(s)")
+        print(f"  (Change Control reset to 'No Change' for acknowledged rows)")
+        print()
 
     ready_files = merger.get_ready_for_merge()
     if not ready_files:
