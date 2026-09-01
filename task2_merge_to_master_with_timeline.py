@@ -178,17 +178,41 @@ class MasterMerger:
     # -------------------- retention helpers --------------------
 
     @staticmethod
+    def _status_is_active(status) -> bool:
+        """
+        True only for genuinely active statuses ("Activated", "Active").
+        Negated statuses ("Deactivated", "Inactive", "Not Applicable") are NOT active.
+        """
+        s = str(status or "").strip().lower()
+        if not s:
+            return False
+        if "deactiv" in s or "inactiv" in s or s.startswith("not"):
+            return False
+        return "activ" in s
+
+    @staticmethod
+    def _status_is_installed(status) -> bool:
+        """
+        True only for genuinely installed statuses ("Installed", "Existing").
+        Negated or pending statuses ("Install Never", "Uninstalled", "Not Installed",
+        "Needs Install") are NOT installed.
+        """
+        s = str(status or "").strip().lower()
+        if not s:
+            return False
+        if "never" in s or "uninstall" in s or "needs" in s or s.startswith("not"):
+            return False
+        return "install" in s or "existing" in s
+
+    @staticmethod
     def _is_installed_or_active(row) -> bool:
         """
         Determines if a camera row should be permanently retained.
-        Returns True if:
-        - Activation Status contains "activat" or "active"
-        - Installation Status contains "install" or "existing"
+        Returns True if the camera is genuinely active OR the hardware is
+        genuinely installed (deactivated-but-still-installed cameras stay retained).
         """
-        activation = str(row.get("Activation Status", "")).lower()
-        installation = str(row.get("Installation Status", "")).lower()
-        return ("activat" in activation) or ("active" in activation) or \
-            ("install" in installation) or ("existing" in installation)
+        return MasterMerger._status_is_active(row.get("Activation Status", "")) or \
+            MasterMerger._status_is_installed(row.get("Installation Status", ""))
 
     # -------------------- overrides --------------------
 
@@ -699,6 +723,12 @@ class MasterMerger:
                 df_master.at[i, "Last Seen In Reports"] = report_date
                 df_master.at[i, "Previous Approval Status"] = old_approval
 
+                # Rows rehydrated from the retention file at school-year rollover carry no
+                # Date First Seen; stamp it the first time the room appears in a report
+                existing_dfs = df_master.at[i, "Date First Seen"]
+                if pd.isna(existing_dfs) or str(existing_dfs).strip() == "":
+                    df_master.at[i, "Date First Seen"] = report_date
+
                 # Update non-protected columns from report
                 for col in self.master_columns:
                     if col in row.index and col not in self.protected_columns:
@@ -841,6 +871,19 @@ class MasterMerger:
                     new_row["Last Fully Approved Date"] = report_date
                     # New classroom starting at 100% - set Parent Consent Status to "Granted"
                     new_row["Parent Consent Status"] = "Granted"
+                    # A room that arrives already at 100% is an approval event the ESE team must
+                    # act on (install / activate). Flag it as a sticky "Approval Gained" rather than
+                    # a plain "Added" so it reaches the Approval Gained report and stays visible
+                    # until acknowledged. Without this, every room approved in the first report of
+                    # a school year was invisible to the action reports.
+                    new_row["Change Control"] = "Approval Gained"
+                    new_row["Change First Seen"] = report_date
+                    new_row["Last Status Change"] = report_date
+                    school = str(new_row.get("School of Instruction", "") or "").strip()
+                    room = str(new_row.get("Room", "") or "").strip()
+                    stats["approval_gained"] += 1
+                    stats["approval_gained_list"].append(
+                        (k, report_date, f"{school} - Room {room} (Report: {report_date})"))
                 else:
                     new_row["Authorized Date"] = ""
                     new_row["Last Fully Approved Date"] = ""
@@ -851,7 +894,8 @@ class MasterMerger:
                 next_idx = len(df_master)
                 df_master.loc[next_idx] = new_row
                 master_idx_by_key[k] = next_idx
-                stats["added"] += 1
+                if new_row["Change Control"] == "Added":
+                    stats["added"] += 1
 
         # Step 2: apply manual Void overrides to master
         if self.void_keys:
@@ -916,17 +960,17 @@ class MasterMerger:
             # NEW: how many students ever opted in?
             opt_in_count = MasterMerger._to_int(df_master.at[i, "# of Students Opt In"])
 
-            # Enhanced classification with flexible substring matching
-            # CRITICAL: Check for both "activat" and "active" to catch both "Activated" and "Active"
+            # Negation-aware classification: "Deactivated"/"Inactive"/"Not Applicable"
+            # must NOT count as active, and "Install Never" must NOT count as installed
             school = str(df_master.at[i, "School of Instruction"] or "").strip()
             room = str(df_master.at[i, "Room"] or "").strip()
             classroom_info = f"{school} - Room {room} (Report: {report_date})"
 
-            if ("activat" in activation_status) or ("active" in activation_status):
+            if MasterMerger._status_is_active(activation_status):
                 label = "Missing - Camera Active"
                 stats["missing_camera_active"] += 1
                 stats["missing_camera_active_list"].append(classroom_info)
-            elif ("install" in installation_status) or ("existing" in installation_status):
+            elif MasterMerger._status_is_installed(installation_status):
                 label = "Missing - Camera Installed"
                 stats["missing_camera_installed"] += 1
                 stats["missing_camera_installed_list"].append(classroom_info)

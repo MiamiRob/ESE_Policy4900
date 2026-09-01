@@ -4,7 +4,7 @@
 
 **Project**: Broward County Public Schools (BCPS) - ESE Classroom Camera Policy 4900 Compliance Tracking
 **Author**: Rob Zimmerman
-**Last Updated**: February 13, 2026
+**Last Updated**: September 1, 2026
 **Version**: 3.0 (Three-Phase Pipeline with Validation)
 
 ---
@@ -101,6 +101,11 @@ C:\BCPS\ESE\
 |   |-- void_overrides.csv
 |
 |-- Backups\Policy4900_Reports_Master\  # Timestamped master backups (auto-created before each merge)
+|
+|-- Archive\                          # Prior-school-year data (see Section 14: School-Year Rollover)
+|   |-- 2025-2026 School Year Archive\
+|   |   |-- Policy4900_Reports_New\            # Prior year's raw/processed reports + markers
+|   |   |-- Policy4900_Reports_Master\         # Prior year's master, Retained.csv, timeline, alert reports
 ```
 
 ### Dependencies
@@ -374,7 +379,7 @@ The master Excel file (`Policy4900_Tracking_Master.xlsx`) has 30 columns on shee
 | Column | Type | Protected | Description |
 |--------|------|-----------|-------------|
 | Report Date | Date | No | Date of the most recent report that included this classroom |
-| Date First Seen | Date | Yes | When classroom first appeared in ANY report. Never changes. |
+| Date First Seen | Date | Yes | When classroom first appeared in ANY report of the current school year. Never changes once set. Rows carried in from the retention file at rollover start blank and are stamped the first time the room appears in a report. |
 | Change Control | String | Yes* | Current change status (see Section 9) |
 | Change Ack | String | Yes | Manual acknowledgment flag - user types "ACK" to acknowledge alerts |
 | Change First Seen | Date | No | When the current Change Control status was first detected |
@@ -452,7 +457,7 @@ For each classroom in the new report:
 
 1. **Build key index**: `master_idx_by_key = {key: positional_index for enumerate(df_master["key_sf"])}`
 2. **Existing classroom** (key found in master):
-   a. Calculate old approval status from current master data
+   a. Calculate old approval status from current master data; stamp Date First Seen if blank (carried-over rows)
    b. Update non-protected columns from report
    c. Calculate new approval status from updated data
    d. Detect transitions:
@@ -463,7 +468,7 @@ For each classroom in the new report:
    g. If no transition, no ACK, and existing alert: keep alert sticky
    h. If no transition, no ACK, no alert: set "No Change" or "Status Changed"
    i. Apply override precedence
-3. **New classroom** (key not in master): Append with Change Control = "Added"
+3. **New classroom** (key not in master): Append with Change Control = "Added". If the room arrives already at 100%, Change Control = "Approval Gained" instead (sticky, counted in the gained list) so it reaches the action report
 
 After processing all report rows:
 
@@ -523,8 +528,8 @@ The `.step2` marker is a JSON file containing processing statistics:
 
 | Value | Meaning | Sticky? |
 |-------|---------|---------|
-| Added | New classroom first appeared | No |
-| Approval Gained | Changed TO "Approved - Camera Authorized" | Yes - until ACK |
+| Added | New classroom first appeared below 100% | No |
+| Approval Gained | Changed TO "Approved - Camera Authorized", or a new classroom that first appeared already at 100% | Yes - until ACK |
 | Approval Lost | Changed FROM "Approved - Camera Authorized" | Yes - until ACK |
 | Status Changed | Approval status changed (non-gain/loss) | No |
 | No Change | Status unchanged from last report | No |
@@ -536,6 +541,21 @@ The `.step2` marker is a JSON file containing processing statistics:
 ### Sticky Alerts
 
 "Approval Gained" and "Approval Lost" are **sticky** -- they persist across reports until the user acknowledges them. This ensures alerts are not missed between pipeline runs.
+
+"Sticky" means the pipeline deliberately refuses to overwrite these values on later runs: even if the next five reports show no change for that room, Change Control keeps displaying the alert. All other Change Control values reflect only the most recent report and get overwritten on the next run.
+
+### Which Rows Need ACK
+
+Only **"Approval Gained"** and **"Approval Lost"** need ACK — they are the only sticky states. Do not ACK the others:
+
+| Change Control | ACK it? | Why |
+|---|---|---|
+| Approval Gained | **Yes** — after queuing the installation | Sticky until ACK |
+| Approval Lost | **Yes** — after stopping the install / deactivating the camera | Sticky until ACK |
+| Added / Status Changed / No Change | No | Self-clears or updates on the next run |
+| Missing - * (all four) | No | Recalculated every run; clears when the room reappears in a report. The pipeline wipes any ACK on missing rows automatically. |
+
+**ACK means "handled," not "seen."** If an "Approval Lost" row is ACKed before the camera is actually dealt with, the alert disappears on the next run and nothing will re-raise it (unless the status transitions again later). For "Missing - Camera Active" (the critical red alert), the response is deactivating the camera — not acknowledging the row.
 
 ### ACK (Acknowledgment) Workflow
 
@@ -588,10 +608,13 @@ Change-tracking columns are excluded because they are temporary:
 
 ### Camera Detection
 
-A classroom is considered installed/active if ANY of these match (case-insensitive, substring matching):
-- Activation Status contains "activat" or "active"
-- Installation Status contains "install"
-- A camera-related status like "pending", "scheduled"
+A classroom is retained if it is genuinely active OR genuinely installed (case-insensitive, negation-aware — see `_status_is_active` / `_status_is_installed`):
+- **Active**: Activation Status contains "activ" AND is not a negated form ("Deactivated", "Inactive", "Not Applicable" do NOT count)
+- **Installed**: Installation Status contains "install" or "existing" AND is not a negated or pending form ("Install Never", "Uninstalled", "Not Installed", "Needs Install" do NOT count)
+
+Deactivated-but-still-installed cameras stay retained (hardware is deployed). The same two helpers drive the Missing-classroom classification, so a deactivated camera that disappears from reports is flagged "Missing - Camera Installed", not the critical "Missing - Camera Active".
+
+Note: `_update_retention_file()` merges with the existing retention CSV and never drops keys — rows that stop qualifying remain in the CSV from prior runs.
 
 ---
 
@@ -601,18 +624,36 @@ A classroom is considered installed/active if ANY of these match (case-insensiti
 
 Some classrooms need to be permanently excluded from tracking (e.g., rooms that no longer exist, administrative spaces incorrectly included).
 
-### How It Works
+### Three Ways a Classroom Becomes Void
 
-1. Edit `C:\BCPS\ESE\Void_Schools\void_overrides.csv` with columns: School of Instruction, Room
-2. During merge (Step 2 of the merge algorithm), each master row is checked against void keys
-3. Matching rows get:
+**1. In the raw report data itself (data-driven — no manual action needed).**
+"Mark if Void" is one of the 13 expected columns in the daily raw CSV from the district. Task 1's `calculate_approval_status()` checks it FIRST — before FISH List, before student counts (`task1_process_reports.py`, `calculate_approval_status`). The trigger is case-insensitive:
+
+- Exact values: `y`, `yes`, `void`, `true`, `1`
+- OR any value *containing* the word "void"
+
+If matched, Approval Status = "Void" and Task 1 also stamps "Void" into the tracking columns (Date First Seen, Installation/Activation Status, Camera Source, etc.) for that row.
+
+**2. The manual override file** — `C:\BCPS\ESE\Void_Schools\void_overrides.csv`:
+
+1. Edit the CSV with columns: School of Instruction, Room, Mark if Void, Approval Status
+2. A row is treated as void if either "Mark if Void" == "Void" OR "Approval Status" == "Void"
+3. During merge (Step 2 of the merge algorithm), each master row is checked against void keys
+4. Matching rows get:
    - Mark if Void = "Void"
    - Approval Status recalculated (returns "Void" because of the Mark if Void check)
    - Override precedence applied (Void is highest priority)
 
-### Also in Master
+**3. Manually typing "Void" in the master.**
+Users can type "Void" in the "Mark if Void" column directly in the master Excel file. The pipeline respects this on every run.
 
-Users can also manually type "Void" (case-insensitive) in the "Mark if Void" column directly in the master Excel file. The pipeline respects this on every run.
+**Caution**: for manual entry in the master, type exactly **"Void"** (case doesn't matter, but the full word does). Task 2's override-precedence and missing-classroom-skip checks compare against the exact word `void`, so a bare `Y` typed in the master would compute a Void status but would NOT get the "skip when missing from reports" treatment.
+
+### Void vs. FISH List N
+
+These are related but distinct data-driven exclusions:
+- **Void** = the room is out of the Policy 4900 program entirely
+- **FISH List = "N"** → "Ineligible - FISH List N" = the room is still in the data but structurally cannot receive a camera, regardless of parent responses. Ranks just below Void in override precedence.
 
 ### Void and Missing Classrooms
 
@@ -631,7 +672,7 @@ Contains a historical record of all approval status changes with dates, useful f
 ### Action Reports
 
 Two Excel files generated per pipeline run (when there are changes):
-- `YYYY-MM-DD-HHMM_Approval_Gained.xlsx` -- Classrooms that newly gained approval
+- `YYYY-MM-DD-HHMM_Approval_Gained.xlsx` -- Classrooms that newly gained approval, including new classrooms that first appeared already at 100%
 - `YYYY-MM-DD-HHMM_Approval_Lost.xlsx` -- Classrooms that lost approval
 
 Saved to `C:\BCPS\ESE\Reports\`
@@ -698,6 +739,36 @@ After reviewing "Approval Gained" or "Approval Lost" alerts:
 3. Type "ACK" in the Change Ack column for each
 4. Save the file
 5. Next time the pipeline runs, those alerts are cleared to "No Change"
+
+Only those two states need ACK — see Section 9, "Which Rows Need ACK."
+
+### School-Year Rollover (Annual)
+
+Performed at the start of each school year (first done August 21, 2026 for the 2026-2027 year):
+
+1. **Archive the old year.** Move the contents of `Policy4900_Reports_New\` (raw CSVs, `*_PROCESSED.csv`, all `.step1`/`.step2`/`.validated_ok` markers) and `Policy4900_Reports_Master\` (master, `Policy4900_Retained.csv`, timeline, alert reports) into `C:\BCPS\ESE\Archive\<YYYY-YYYY> School Year Archive\` under matching subfolder names.
+2. **Start the new year.** Place a fresh/template master in `Policy4900_Reports_Master\`, drop the new year's first raw report into `Policy4900_Reports_New\`, and run the orchestrator.
+3. **Expected first-run behavior:** every classroom in the report appears with Change Control = "Added", except rooms already at 100%, which are flagged "Approval Gained" so they reach the action report (since Sep 2026; before that they were silently "Added"). Zero missing-classroom alerts (the master starts empty). A missing `Policy4900_Retained.csv` is handled gracefully — `load_master()` skips rehydration when the file doesn't exist, and the file is recreated automatically once rows have installation/activation data.
+
+**Carrying installed cameras across the rollover (hardware facts only).** Archiving `Policy4900_Retained.csv` means the fresh master knows nothing about cameras physically installed during the prior year, so the "Missing - Camera Installed/Active" safety net cannot fire for them. The fix is to carry the prior year's retention rows forward **scrubbed to hardware and identity facts only**. Do NOT copy the archived CSV back verbatim: it also carries the prior year's student counts, Approval Status, Authorized Date, Date Added to Installation List, Date First Seen, Installation Date and Activation Date. Those columns are protected (set only when blank, never overwritten), so prior-year dates would stick for the whole new year, and the stale counts make the first new-year merge compare this year's status against last year's and raise false "Approval Lost" alerts (26 of them on 2026-09-01).
+
+Build the scrubbed retention file from the archived one (same 30 columns, same order), keeping:
+- `School of Instruction`, `FISH Number`, `Room`, `FISH List`, `key_sf`
+- `Installation Status`, `Camera Source School`, `Camera Source Classroom`, `Camera Type`, `Notes`
+- `Activation Status` = "Inactive" for rows whose Installation Status is Installed / Existing / Deactivated (hardware present), blank otherwise
+
+and blanking everything else: all student counts and percentages, `Mark if Void`, `Report Date`, `Date First Seen`, `Last Seen In Reports`, `Authorized Date`, `Previous Approval Status`, `Approval Status`, `Parent Consent Status`, `Date Added to Installation List`, `Installation Date`, `Activation Date`. Prior-year install and activation dates live on in the archive; the new-year master shows only dates that happen in the new year.
+
+Place the scrubbed CSV in `Policy4900_Reports_Master\` **before the first merge of the new year**. Rehydration dedups with "master wins," so restoring it after rooms already exist in the new master silently discards the hardware data for overlapping rooms.
+
+**If merges already ran against the wrong data** (as happened 2026-08-21 and 2026-09-01), replay the year:
+1. Safety-copy the current master, retention CSV and timeline to `Backups\Policy4900_Reports_Master\`; move any action reports generated from the bad data out of `Reports\`
+2. Write the scrubbed retention CSV as above (source hardware columns from the current master if it holds newer manual edits than the archive)
+3. Delete `Policy4900_Tracking_Master.xlsx` (regenerable; manual hardware columns come back through the retention file)
+4. Delete every new-year report's `.step2` marker
+5. Run Task 2 — `load_master()` starts empty, rehydrates the 70 hardware rows, then merges the reports in date order
+
+The 2026-09-01 replay result: 837 rows = 767 report-only rooms + 70 carried hardware rooms. Zero dates before 08-20-2026 in any column; Installation Date and Activation Date blank everywhere (nothing installed or activated yet this year). Alert mix: 518 Added, 247 No Change, 47 Status Changed, 6 Approval Gained, 0 Approval Lost, 0 Missing - Camera Active, 16 Missing - Camera Installed, 3 Missing - No Approval. Carried rooms absent from every new-year report show a blank Approval Status and Date First Seen until they appear.
 
 ---
 
@@ -810,6 +881,30 @@ To compare any two versions of the master file, load both as DataFrames, build `
 
 ## 18. Bug Fix History
 
+### Rooms Arriving at 100% Never Reached the Approval Gained Report (Fixed Sep 2026)
+
+**Bug**: The Approval Gained report is built from rooms that *transitioned* to 100% during a run. A room that first appeared in a report already at 100% was labeled "Added" and never entered the gained list, so it never appeared on any action report. In the first report of a school year every approved room falls in this bucket. On 2026-09-01 seven approved rooms (Orange Brook 16-1717 from the 08-20 report; Cypress Bay 03-314, Driftwood 02-203, Everglades 85-857, Lakeside 01-152, Stranahan 01-127 and 01-129 from the 09-01 report) had never been on a report.
+
+**Fix**: In `merge_report_into_master`, a new row whose calculated status is "Approved - Camera Authorized" gets Change Control = "Approval Gained" (sticky, needs ACK), Change First Seen / Last Status Change = report date, and is appended to `approval_gained_list`; it is no longer counted under "added". One-time: the seven rows were marked Approval Gained and the 09-01 report regenerated with all 13 approved rooms.
+
+### Prior-Year Approval Data Carried Through the Retention File (Fixed Sep 2026)
+
+**Bug**: At the 2026-2027 rollover the archived `Policy4900_Retained.csv` was copied back verbatim to carry installed cameras forward. Besides hardware facts it carried last year's student counts, Approval Status, Authorized Date, Date Added to Installation List, Date First Seen, Installation Date and Activation Date for 70 rooms. Those columns are protected, so the 2025 dates stuck. When those rooms reappeared in the 09-01-2026 report the pipeline compared this year's status against last April's 100% opt-in and raised 26 false "Approval Lost" alerts, whose override also masked the real "Awaiting Responses" status.
+
+**Fix**: Rebuilt the retention file with hardware/identity facts only (see Section 14), deleted the master and both `.step2` markers, and replayed the 08-20 and 09-01 reports. Added a Date First Seen stamp for existing rows that lack one, so carried rooms get a current-year first-seen date when they first appear. Documented the scrubbed-retention procedure as the rollover standard.
+
+### "Needs Install" Counted as Installed (Fixed Sep 2026)
+
+**Bug**: `_status_is_installed()` matched the substring "install", so "Needs Install" (no camera yet) was retained and, when missing from a report, flagged "Missing - Camera Installed".
+
+**Fix**: "needs" added to the negation list alongside "never", "uninstall" and "not".
+
+
+### Negated Statuses Misclassified as Active/Installed (Fixed Aug 2026)
+
+**Bug**: Camera detection used plain substring matching — `"activat" in status` counted **"Deactivated"** and **"Inactive"** as active, and `"install" in status` counted **"Install Never"** as installed. After the 2026 school-year rollover, 55 deactivated cameras were flagged as CRITICAL "Missing - Camera Active", and no data fix could clear them because the classifier re-misread "Deactivated" on every merge.
+
+**Fix**: Added negation-aware helpers `_status_is_active()` / `_status_is_installed()` in `task2_merge_to_master_with_timeline.py`, used by both `_is_installed_or_active()` (retention) and the missing-classroom classification. Negated forms ("Deactivated", "Inactive", "Not Applicable", "Install Never", "Uninstalled", "Not ...") no longer match.
 
 ### ACK Never Consumed (Fixed Feb 2026)
 
