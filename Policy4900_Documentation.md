@@ -4,7 +4,7 @@
 
 **Project**: Broward County Public Schools (BCPS) - ESE Classroom Camera Policy 4900 Compliance Tracking
 **Author**: Rob Zimmerman
-**Last Updated**: September 15, 2026
+**Last Updated**: September 16, 2026
 **Version**: 3.0 (Three-Phase Pipeline with Validation)
 
 ---
@@ -124,6 +124,12 @@ numpy>=1.24.0
 openpyxl>=3.1.0
 colorama>=0.4.6
 ```
+
+### Claude Code Launcher
+
+`C:\Users\rlzim\Desktop\Start_ESE_CC.bat` opens a Claude Code session in the code directory with session name `ESE` and Remote Control tag `ESE_Policy4900`. It passes an orientation prompt that points the assistant to this document, tells it to use the project `.venv` rather than system Python, and tells it not to run the pipeline, edit the master, or start redesign work unless asked. If Claude Code is not on PATH it copies the prompt to the clipboard and leaves an open console in the code directory instead.
+
+Batch note: the prompt text must not contain parentheses. `cmd` expands `%PROMPT_TEXT%` inside `if ( ... )` blocks at parse time, so an unbalanced `)` breaks the script with "data was unexpected at this time."
 
 ---
 
